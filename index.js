@@ -11,11 +11,11 @@ const express = require("express");
 const { initializeApp, getApps, getApp } = require("firebase/app");
 const { getFirestore, doc, getDoc, setDoc, deleteDoc } = require("firebase/firestore");
 
-// --- CONNECT TO YOUR FILES ---
+// --- LOAD YOUR FILES ---
 const config = require('./config');
-const { processCommand } = require('./gameEngine'); // <--- THIS LOADS YOUR FULL GAME
+const GameEngine = require('./gameEngine'); 
 
-// --- FIREBASE INIT (Auth System) ---
+// --- 1. INITIALIZE DATABASE (Fixing the missing link) ---
 // We check if Firebase is already running to avoid errors
 let app;
 if (getApps().length === 0) {
@@ -25,13 +25,13 @@ if (getApps().length === 0) {
 }
 const db = getFirestore(app);
 
-// --- SERVER (Keeps the Bot Awake) ---
+// --- 2. SERVER (Keeps Bot Awake) ---
 const server = express();
 const port = process.env.PORT || 3000;
 server.get("/", (req, res) => res.send("City RPG Bot is ALIVE."));
 server.listen(port, () => console.log(`Server on port ${port}`));
 
-// --- AUTHENTICATION (Saves Login to Database) ---
+// --- 3. AUTHENTICATION (Saves Login) ---
 const useFirestoreAuthState = async (collectionName) => {
     const credsRef = doc(db, collectionName, "creds");
     const credsSnap = await getDoc(credsRef);
@@ -54,29 +54,23 @@ const useFirestoreAuthState = async (collectionName) => {
     };
 
     return {
-        state: {
-            creds,
-            keys: {
-                get: keys,
-                set: async (data) => {
-                    const tasks = [];
-                    for (const category in data) {
-                        for (const id in data[category]) {
-                            const value = data[category][id];
-                            const docRef = doc(db, collectionName, `${category}-${id}`);
-                            if (value) tasks.push(setDoc(docRef, { value: JSON.stringify(value, BufferJSON.replacer) }, { merge: true }));
-                            else tasks.push(deleteDoc(docRef));
-                        }
-                    }
-                    await Promise.all(tasks);
+        state: { creds, keys: { get: keys, set: async (data) => {
+            const tasks = [];
+            for (const category in data) {
+                for (const id in data[category]) {
+                    const value = data[category][id];
+                    const docRef = doc(db, collectionName, `${category}-${id}`);
+                    if (value) tasks.push(setDoc(docRef, { value: JSON.stringify(value, BufferJSON.replacer) }, { merge: true }));
+                    else tasks.push(deleteDoc(docRef));
                 }
             }
-        },
+            await Promise.all(tasks);
+        }}},
         saveCreds
     };
 };
 
-// --- START BOT ---
+// --- 4. START BOT ---
 async function startBot() {
     const { state, saveCreds } = await useFirestoreAuthState("auth_baileys");
     const { version } = await fetchLatestBaileysVersion();
@@ -92,7 +86,7 @@ async function startBot() {
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
-    // PAIRING CODE LOGIC
+    // PAIRING CODE
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
@@ -114,7 +108,7 @@ async function startBot() {
 
     sock.ev.on("creds.update", saveCreds);
 
-    // --- MESSAGE HANDLER ---
+    // --- 5. MESSAGE HANDLER (The Bridge) ---
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const m = messages[0];
         if (!m.message || m.key.fromMe) return;
@@ -127,12 +121,12 @@ async function startBot() {
 
         const sender = m.key.remoteJid;
 
-        // --- EXECUTE GAME LOGIC ---
-        // This single line runs your entire 900+ line game engine
+        // SEND TO GAME ENGINE
         try {
-            await processCommand(sock, m, text, sender);
-        } catch (error) {
-            console.log("Game Engine Error:", error);
+            // This runs the logic inside gameEngine.js
+            await GameEngine.processCommand(sock, m, text, sender);
+        } catch (err) {
+            console.log("Game Error:", err);
         }
     });
 }
