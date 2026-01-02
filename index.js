@@ -836,7 +836,7 @@ async function startBot() {
         if (!text) return;
 
         const sender = m.key.remoteJid;
-        const isAdmin = sender.includes(config.botNumber);
+        const isAdmin = sender.includes(config.adminNumber.split('@')[0]); // Check against config admin
 
         // 1. Get/Create User & Check Income
         const user = await getUser(sender);
@@ -883,14 +883,7 @@ async function startBot() {
 
         // Thief Actions
         else if (cmd === '/scantarget') await ActionEngine.scanTargets(user, sock, m);
-        else if (cmd === '/scanps') await ActionEngine.scanThieves(user, sock, m); // Reusing scan logic showing police if needed, but per rules scanps shows police
-        // Note: I will map /scanps to a simple text list of police for now to save space
-        else if (cmd === '/scanps' && user.role === 'thief') {
-             // Quick Inline Logic for Police Scan
-             if(user.wealth < config.costScanPolice) return sock.sendMessage(sender, {text: getText('not_enough_cash')});
-             await updateDoc(doc(db, "users", sender), {wealth: user.wealth - config.costScanPolice});
-             await sock.sendMessage(sender, {text: "👮 Police Scan: (Logic active - Detecting police...)"});
-        }
+        else if (cmd === '/scanps') await ActionEngine.scanThieves(user, sock, m); 
         else if (cmd === '/rob' || text.includes('/rob')) {
             const guess = text.match(/\d+$/)?.[0]; // Extract numbers at end
             if (mentionedJid && guess) await ActionEngine.robUser(user, mentionedJid, guess, sock, m);
