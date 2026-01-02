@@ -30,7 +30,7 @@ const port = process.env.PORT || 3000;
 server.get("/", (req, res) => res.send("City RPG Bot is ALIVE."));
 server.listen(port, () => console.log(`Server on port ${port}`));
 
-// --- 3. AUTHENTICATION ---
+// --- 3. AUTHENTICATION (CHANGED TO V2 TO FORCE RESET) ---
 const useFirestoreAuthState = async (collectionName) => {
     const credsRef = doc(db, collectionName, "creds");
     const credsSnap = await getDoc(credsRef);
@@ -71,7 +71,8 @@ const useFirestoreAuthState = async (collectionName) => {
 
 // --- 4. START BOT ---
 async function startBot() {
-    const { state, saveCreds } = await useFirestoreAuthState("auth_baileys");
+    // *** KEY CHANGE HERE: "auth_baileys_v2" forces a fresh start ***
+    const { state, saveCreds } = await useFirestoreAuthState("auth_baileys_v2");
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
@@ -88,10 +89,11 @@ async function startBot() {
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
+                // Request Pairing Code
                 const code = await sock.requestPairingCode(config.botNumber);
                 console.log(`\n\n[ PAIRING CODE ] : ${code.match(/.{1,4}/g)?.join("-")}\n\n`);
             } catch (e) { console.log("Pairing Error:", e); }
-        }, 4000);
+        }, 5000);
     }
 
     sock.ev.on("connection.update", (update) => {
@@ -100,8 +102,6 @@ async function startBot() {
         if (connection === "close") {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log("❌ Connection closed. Reconnecting in 5 seconds...");
-            
-            // --- THE FIX: WAIT 5 SECONDS BEFORE RESTARTING ---
             if (shouldReconnect) {
                 setTimeout(() => startBot(), 5000);
             }
