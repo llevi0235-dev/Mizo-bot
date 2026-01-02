@@ -15,21 +15,7 @@ const {
     where, orderBy, limit, getDocs, addDoc 
 } = require("firebase/firestore");
 
-// --- CONFIGURATION ---
-// You do not need a config.js file anymore.
-const config = {
-    botNumber: "919233137736",
-    adminNumber: "919233137736",
-    firebaseConfig: {
-        // ⚠️ PASTE YOUR FIREBASE KEYS HERE FROM YOUR OLD config.js OR FIREBASE CONSOLE ⚠️
-        apiKey: "PASTE_YOUR_API_KEY_HERE",
-        authDomain: "PASTE_YOUR_AUTH_DOMAIN_HERE",
-        projectId: "PASTE_YOUR_PROJECT_ID_HERE",
-        storageBucket: "PASTE_YOUR_STORAGE_BUCKET_HERE",
-        messagingSenderId: "PASTE_YOUR_SENDER_ID_HERE",
-        appId: "PASTE_YOUR_APP_ID_HERE"
-    }
-};
+const config = require('./config');
 
 // --- INITIALIZE FIREBASE ---
 let app;
