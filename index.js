@@ -15,8 +15,7 @@ const { getFirestore, doc, getDoc, setDoc, deleteDoc } = require("firebase/fires
 const config = require('./config');
 const GameEngine = require('./gameEngine'); 
 
-// --- 1. INITIALIZE DATABASE (Fixing the missing link) ---
-// We check if Firebase is already running to avoid errors
+// --- 1. INITIALIZE DATABASE ---
 let app;
 if (getApps().length === 0) {
     app = initializeApp(config.firebaseConfig);
@@ -31,7 +30,7 @@ const port = process.env.PORT || 3000;
 server.get("/", (req, res) => res.send("City RPG Bot is ALIVE."));
 server.listen(port, () => console.log(`Server on port ${port}`));
 
-// --- 3. AUTHENTICATION (Saves Login) ---
+// --- 3. AUTHENTICATION ---
 const useFirestoreAuthState = async (collectionName) => {
     const credsRef = doc(db, collectionName, "creds");
     const credsSnap = await getDoc(credsRef);
@@ -86,7 +85,6 @@ async function startBot() {
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
-    // PAIRING CODE
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
@@ -98,17 +96,22 @@ async function startBot() {
 
     sock.ev.on("connection.update", (update) => {
         const { connection, lastDisconnect } = update;
+        
         if (connection === "close") {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startBot();
+            console.log("❌ Connection closed. Reconnecting in 5 seconds...");
+            
+            // --- THE FIX: WAIT 5 SECONDS BEFORE RESTARTING ---
+            if (shouldReconnect) {
+                setTimeout(() => startBot(), 5000);
+            }
         } else if (connection === "open") {
-            console.log("Connected successfully, My Lord.");
+            console.log("✅ Connected successfully, My Lord.");
         }
     });
 
     sock.ev.on("creds.update", saveCreds);
 
-    // --- 5. MESSAGE HANDLER (The Bridge) ---
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const m = messages[0];
         if (!m.message || m.key.fromMe) return;
@@ -118,12 +121,9 @@ async function startBot() {
                      msgType === "extendedTextMessage" ? m.message.extendedTextMessage.text : "";
         
         if (!text) return;
-
         const sender = m.key.remoteJid;
 
-        // SEND TO GAME ENGINE
         try {
-            // This runs the logic inside gameEngine.js
             await GameEngine.processCommand(sock, m, text, sender);
         } catch (err) {
             console.log("Game Error:", err);
