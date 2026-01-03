@@ -41,7 +41,8 @@ const ROLES = {
 };
 
 const activeUsers = new Map();
-let sock; // Global variable for the connection
+let sock;
+let pairingCodeRequested = false; 
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
@@ -53,17 +54,23 @@ async function startBot() {
     browser: ["Ubuntu", "Chrome", "20.0.04"],
   });
 
-  // --- PAIRING CODE LOGIC ---
-  if (!sock.authState.creds.registered) {
-    const phoneNumber = "919233137736"; // YOUR NUMBER
+  // --- PAIRING CODE GENERATION ---
+  // We added '!pairingCodeRequested' to stop the double code spam
+  if (!sock.authState.creds.registered && !pairingCodeRequested) {
+    pairingCodeRequested = true; // Lock it immediately
+    const phoneNumber = "919233137736"; 
+    
     setTimeout(async () => {
       try {
         const code = await sock.requestPairingCode(phoneNumber);
         console.log("\n============================================");
         console.log("🚨 PAIRING CODE: " + code);
         console.log("============================================\n");
-      } catch (err) { console.log("Pairing error: " + err); }
-    }, 5000);
+      } catch (err) { 
+          console.log("Pairing error: " + err);
+          pairingCodeRequested = false; // Unlock if it failed
+      }
+    }, 10000); // Increased to 10 seconds to be safe
   }
 
   sock.ev.on("creds.update", saveCreds);
