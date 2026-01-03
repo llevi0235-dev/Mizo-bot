@@ -1,3 +1,4 @@
-node_modules
-npm-debug.log
-.DS_Store
+auth_info.json
+node_modules/
+.env
+*.log
