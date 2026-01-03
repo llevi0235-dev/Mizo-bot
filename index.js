@@ -1,5 +1,5 @@
 // ==========================================
-// MIZO ROLEPLAY BOT — FINAL FIXED VERSION
+// MIZO ROLEPLAY BOT — FINAL STABLE VERSION
 // ==========================================
 
 const {
@@ -61,14 +61,13 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ========== SAFE PAIRING (NO TIMEOUT, NO LOOP) ==========
+  // ========== SAFE PAIRING (EXPECTED 428 AFTER CODE) ==========
   if (!state.creds.registered && !pairingRequested) {
     pairingRequested = true;
-    const phoneNumber = "919233137736";
+    const phoneNumber = "919233137736"; // YOUR NUMBER
 
     (async () => {
       try {
-        // WAIT for WhatsApp Web handshake to reach valid state
         await sock.waitForConnectionUpdate(
           (u) => u.connection === "connecting" || u.connection === "open"
         );
@@ -98,7 +97,7 @@ async function startBot() {
       if (reason === DisconnectReason.loggedOut) {
         console.log("❌ Logged out. Delete auth_info_baileys and restart.");
       }
-      // ❗ NO restart loop — Baileys handles reconnection internally
+      // NO RESTART LOOP — THIS IS CORRECT
     }
   });
 
@@ -216,7 +215,7 @@ setInterval(async () => {
     }
   }
 
-  if (Object.keys(updates).length) {
+  if (Object.keys(updates).length > 0) {
     await update(ref(db), updates);
   }
 }, 30 * 60 * 1000);
