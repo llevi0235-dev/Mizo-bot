@@ -1,5 +1,5 @@
 // ==========================================
-// MIZO ROLEPLAY BOT — FINAL STABLE VERSION
+// MIZO ROLEPLAY BOT — FINAL FIXED VERSION
 // ==========================================
 
 const {
@@ -61,28 +61,34 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ========== PAIRING (ONLY ONCE, NO LOOP) ==========
+  // ========== SAFE PAIRING (NO TIMEOUT, NO LOOP) ==========
   if (!state.creds.registered && !pairingRequested) {
     pairingRequested = true;
     const phoneNumber = "919233137736";
 
-    setTimeout(async () => {
+    (async () => {
       try {
+        // WAIT for WhatsApp Web handshake to reach valid state
+        await sock.waitForConnectionUpdate(
+          (u) => u.connection === "connecting" || u.connection === "open"
+        );
+
         const code = await sock.requestPairingCode(phoneNumber);
+
         console.log("\n====================================");
         console.log("🚨 PAIRING CODE 🚨");
         console.log("CODE:", code);
         console.log("====================================\n");
-      } catch (e) {
-        console.error("❌ Pairing error:", e);
+      } catch (err) {
+        console.error("❌ Pairing failed:", err);
       }
-    }, 5000);
+    })();
   }
 
   // ========== CONNECTION STATUS ==========
   sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "open") {
-      console.log("✅ WhatsApp connected");
+      console.log("✅ WhatsApp connected successfully");
     }
 
     if (connection === "close") {
@@ -92,7 +98,7 @@ async function startBot() {
       if (reason === DisconnectReason.loggedOut) {
         console.log("❌ Logged out. Delete auth_info_baileys and restart.");
       }
-      // ❗ NO RECURSION — Baileys handles reconnect
+      // ❗ NO restart loop — Baileys handles reconnection internally
     }
   });
 
@@ -170,6 +176,7 @@ async function startBot() {
 // ================== ROLE LOGIC ==================
 async function changeRole(uid, user, role) {
   const now = Date.now();
+
   if (user.lastRoleChange && now - user.lastRoleChange < 172800000) {
     return "❌ Wait 2 days before changing role.";
   }
@@ -203,8 +210,10 @@ setInterval(async () => {
     if (user.role === "citizen") income = 400;
     if (user.role === "police") income = 450;
     if (user.role === "businessman") income = 1000;
-    if (income > 0)
+
+    if (income > 0) {
       updates[`users/${uid}/cash`] = (user.cash || 0) + income;
+    }
   }
 
   if (Object.keys(updates).length) {
