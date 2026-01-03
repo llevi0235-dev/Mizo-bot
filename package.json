@@ -5,10 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "clean": "rm -rf auth_info.json"
+    "clean": "rm -rf auth_info_baileys"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.0.0",
+    "@whiskeysockets/baileys": "^6.7.9",
     "firebase": "^11.0.2",
     "express": "^4.21.0"
   }
