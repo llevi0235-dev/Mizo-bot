@@ -4,6 +4,12 @@ const express = require("express");
 const admin = require("firebase-admin");
 const cron = require("node-cron");
 const app = express();
+const fs = require('fs');
+// FORCE LOGOUT: Delete old session to get a new code
+if (fs.existsSync('auth_info_baileys')) {
+    fs.rmSync('auth_info_baileys', { recursive: true, force: true });
+    console.log("Old session deleted. Generating new code...");
+}
 
 // --- RENDER SERVER FIX ---
 const PORT = process.env.PORT || 3000;
