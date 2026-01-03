@@ -1,12 +1,19 @@
 // ==========================================
-// MIZO ROLEPLAY BOT - PHASE 1 + PAIRING
+// MIZO ROLEPLAY BOT - RENDER VERSION
 // ==========================================
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
 const pino = require("pino");
-const readline = require("readline");
 const { initializeApp } = require("firebase/app");
 const { getDatabase, ref, get, set, update } = require("firebase/database");
+const express = require("express"); // Added for Render
+const app = express();
+
+// --- 0. RENDER KEEPALIVE SERVER ---
+// This keeps the bot running 24/7 on Render
+const port = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Mizo RP Bot is Active!'));
+app.listen(port, () => console.log(`Server listening on port ${port}`));
 
 // --- 1. FIREBASE CONFIG ---
 const firebaseConfig = {
@@ -19,8 +26,8 @@ const firebaseConfig = {
   appId: "1:1029278826614:web:b608af7356752ff2e9df57"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
 
 // --- 2. GAME UTILS ---
 function generateId(length) {
@@ -32,29 +39,33 @@ function generateId(length) {
   return result;
 }
 
-const question = (text) => {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => rl.question(text, (answer) => { rl.close(); resolve(answer); }));
-};
-
 // --- 3. WHATSAPP CONNECTION LOGIC ---
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
 
   const sock = makeWASocket({
     logger: pino({ level: "silent" }),
-    printQRInTerminal: false, // We use Pairing Code, not QR
+    printQRInTerminal: false,
     auth: state,
     browser: ["MizoRP", "Chrome", "1.0.0"],
   });
 
-  // --- PAIRING CODE GENERATION ---
+  // --- AUTOMATIC PAIRING CODE ---
   if (!sock.authState.creds.registered) {
-    console.log("\n============================================");
-    const phoneNumber = await question("Enter your Bot Phone Number (e.g., 919876543210): ");
-    const code = await sock.requestPairingCode(phoneNumber);
-    console.log(`\nYOUR PAIRING CODE: ${code}`);
-    console.log("============================================\n");
+    // YOUR NUMBER IS HARDCODED HERE SO RENDER DOESN'T ASK FOR IT
+    const phoneNumber = "919233137736"; 
+    
+    setTimeout(async () => {
+        try {
+            const code = await sock.requestPairingCode(phoneNumber);
+            console.log("\n============================================");
+            console.log("🚨 PAIRING CODE GENERATED 🚨");
+            console.log(`CODE: ${code}`);
+            console.log("============================================\n");
+        } catch (err) {
+            console.log("Error requesting pairing code: " + err);
+        }
+    }, 3000); // Wait 3 seconds then generate
   }
 
   sock.ev.on("creds.update", saveCreds);
@@ -63,7 +74,7 @@ async function startBot() {
     const { connection, lastDisconnect } = update;
     if (connection === "close") {
       const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log("Connection closed due to ", lastDisconnect.error, ", reconnecting ", shouldReconnect);
+      console.log("Connection closed, reconnecting...", shouldReconnect);
       if (shouldReconnect) startBot();
     } else if (connection === "open") {
       console.log("✅ BOT CONNECTED SUCCESSFULLY!");
@@ -77,11 +88,10 @@ async function startBot() {
       if (!msg.message || msg.key.fromMe) return;
 
       const from = msg.key.remoteJid;
-      // Get text content (handle different message types)
       const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-      if (!text) return; // Ignore non-text messages
+      if (!text) return;
       
-      const senderId = from.split('@')[0]; // The phone number
+      const senderId = from.split('@')[0];
       const lowerText = text.toLowerCase();
 
       // --- GAME DATABASE CHECK ---
@@ -89,90 +99,33 @@ async function startBot() {
       const snap = await get(userRef);
       let user = snap.val();
 
-      // AUTO-REGISTER NEW USERS AS CITIZENS
       if (!user) {
-        user = {
-          role: 'citizen',
-          cash: 10000,
-          specialId: generateId(3),
-          joinedAt: Date.now()
-        };
+        user = { role: 'citizen', cash: 10000, specialId: generateId(3), joinedAt: Date.now() };
         await set(userRef, user);
-        // Optional: Welcome message
-        // await sock.sendMessage(from, { text: "Welcome! You are now a Citizen. / Citizen i ni ta." });
       }
 
       // --- COMMANDS ---
 
-      // --- /menu ---
       if (lowerText === '/menu') {
-        const menuMsg = `
-📜 *GAME MENU* 📜
-
-1️⃣ */status* - Show your stats (Role, Money, ID)
-   - I chanchin, pawisa leh ID enna.
-
-2️⃣ */crlps*
-   - Join the Police Force
-   - Police ah inthlakna.
-
-3️⃣ */crltf*
-   - Become a Thief
-   - Rukru (Thief) ah inthlakna.
-
-4️⃣ */crlbs*
-   - Become a Businessman
-   - Sumdawng (Businessman) ah inthlakna.
-
-5️⃣ */ubank*
-   - Check Universal Bank Balance.
-   - Bank pui ber sum enna.
-
--------------------------
-_Type the command to use it._
-_Command hmang turin a hming chhu rawh._
-        `;
+        const menuMsg = `📜 *GAME MENU* 📜\n\n1️⃣ */status* - Stats\n2️⃣ */crlps* - Police\n3️⃣ */crltf* - Thief\n4️⃣ */crlbs* - Businessman\n5️⃣ */ubank* - Universal Bank`;
         await sock.sendMessage(from, { text: menuMsg });
         return;
       }
 
-      // --- /status ---
       if (lowerText === '/status' || lowerText === '/stats') {
          let displayId = "N/A";
-         if (user.role === 'citizen') displayId = user.specialId.toString().substring(0, 2) + "?";
-         if (user.role === 'businessman') displayId = user.specialId.toString().substring(0, 3) + "???"; 
-         if (user.role === 'police') displayId = "No ID / ID a awmlo";
+         if (user.role === 'citizen') displayId = (user.specialId || "000").toString().substring(0, 2) + "?";
+         if (user.role === 'businessman') displayId = (user.specialId || "000").toString().substring(0, 3) + "???"; 
+         if (user.role === 'police') displayId = "No ID";
          
-         const statusMsg = `
-📊 *STATUS / DINHMUN*
-👤 *Role:* ${user.role.toUpperCase()}
-💰 *Cash:* ${user.cash}
-🆔 *ID:* ${displayId}
-         `;
+         const statusMsg = `📊 *STATUS*\n👤 Role: ${user.role.toUpperCase()}\n💰 Cash: ${user.cash}\n🆔 ID: ${displayId}`;
          await sock.sendMessage(from, { text: statusMsg });
          return;
       }
 
-      // --- /crlps (Police) ---
-      if (lowerText === '/crlps') {
-         const res = await changeRole(senderId, user, 'police');
-         await sock.sendMessage(from, { text: res });
-         return;
-      }
-
-      // --- /crltf (Thief) ---
-      if (lowerText === '/crltf') {
-         const res = await changeRole(senderId, user, 'thief');
-         await sock.sendMessage(from, { text: res });
-         return;
-      }
-
-      // --- /crlbs (Businessman) ---
-      if (lowerText === '/crlbs') {
-         const res = await changeRole(senderId, user, 'businessman');
-         await sock.sendMessage(from, { text: res });
-         return;
-      }
+      if (lowerText === '/crlps') return await sock.sendMessage(from, { text: await changeRole(senderId, user, 'police') });
+      if (lowerText === '/crltf') return await sock.sendMessage(from, { text: await changeRole(senderId, user, 'thief') });
+      if (lowerText === '/crlbs') return await sock.sendMessage(from, { text: await changeRole(senderId, user, 'businessman') });
 
     } catch (err) {
       console.error("Error processing message:", err);
@@ -184,18 +137,11 @@ _Command hmang turin a hming chhu rawh._
 
 async function changeRole(uid, currentUser, newRole) {
   const now = Date.now();
-  // Check Cooldown (2 Days)
   if (currentUser.lastRoleChange && (now - currentUser.lastRoleChange < 172800000)) {
-    return `❌ *FAILED / THEILOH*
-    
-You must wait 2 days to change roles.
-Role thlak turin ni 2 i nghah a ngai.`;
+    return `❌ FAILED: You must wait 2 days to change roles.`;
   }
 
-  const updates = {
-    role: newRole,
-    lastRoleChange: now
-  };
+  const updates = { role: newRole, lastRoleChange: now };
 
   if (newRole === 'businessman') {
     updates.specialId = generateId(6);
@@ -210,16 +156,11 @@ Role thlak turin ni 2 i nghah a ngai.`;
   }
 
   await update(ref(db, 'users/' + uid), updates);
-  
-  return `✅ *SUCCESS / HLOWHTLING*
-  
-Role changed to: *${newRole.toUpperCase()}*
-Nihna thlak a ni: *${newRole.toUpperCase()}*`;
+  return `✅ SUCCESS: Role changed to ${newRole.toUpperCase()}.`;
 }
 
 // --- 6. INCOME LOOPS ---
 setInterval(async () => {
-  // 30 min income
   const usersRef = ref(db, 'users');
   const snap = await get(usersRef);
   if (!snap.exists()) return;
@@ -237,5 +178,4 @@ setInterval(async () => {
   if (Object.keys(updates).length > 0) await update(ref(db), updates);
 }, 30 * 60 * 1000);
 
-// START EVERYTHING
 startBot();
