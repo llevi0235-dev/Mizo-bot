@@ -1,5 +1,5 @@
 // ==========================================
-// MIZO ROLEPLAY BOT — COMPLETE WORKING VERSION
+// MIZO ROLEPLAY BOT — QR CODE VERSION
 // ==========================================
 
 const {
@@ -9,9 +9,9 @@ const {
   delay,
   Browsers
 } = require("@whiskeysockets/baileys");
+const qrcode = require("qrcode-terminal");
 const pino = require("pino");
 const express = require("express");
-const axios = require("axios");
 
 // ================== KEEPALIVE ==================
 const app = express();
@@ -43,60 +43,33 @@ function generateId(len) {
   ).join("");
 }
 
-function formatTime() {
-  return new Date().toLocaleTimeString();
-}
-
-// ================== PAIRING CODE HANDLER ==================
-async function handlePairing(sock) {
-  try {
-    console.log("\n" + "=".repeat(60));
-    console.log("🔐 REQUESTING WHATSAPP PAIRING CODE");
-    console.log("=".repeat(60));
-    
-    // Your phone number with country code (no +)
-    const phoneNumber = "919233137736";
-    
-    console.log(`📞 Requesting code for: ${phoneNumber}`);
-    console.log("⏳ Please wait...");
-    
-    // Request pairing code
-    const code = await sock.requestPairingCode(phoneNumber);
-    
-    console.log("\n✅ PAIRING CODE GENERATED!");
-    console.log("=".repeat(60));
-    console.log(`📱 Phone: ${phoneNumber}`);
-    console.log(`🔢 Code: ${code}`);
-    console.log("=".repeat(60));
-    console.log("\n📲 HOW TO USE:");
-    console.log("1. Open WhatsApp on your phone");
-    console.log("2. Go to Settings → Linked Devices");
-    console.log("3. Tap 'Link a Device'");
-    console.log("4. Tap 'Link with phone number instead'");
-    console.log(`5. Enter this code: ${code}`);
-    console.log("6. Bot will connect automatically");
-    console.log("\n⏱️  Code expires in 30 seconds");
-    console.log("=".repeat(60));
-    
-    return true;
-  } catch (error) {
-    console.error("\n❌ Failed to get pairing code:", error.message);
-    
-    if (error.message.includes("rate limit")) {
-      console.log("⚠️  Too many attempts. Wait 10 minutes and restart.");
-    } else if (error.message.includes("not registered")) {
-      console.log("⚠️  Phone number not registered on WhatsApp.");
-    } else {
-      console.log("⚠️  Try again in 30 seconds...");
-    }
-    
-    return false;
-  }
+// ================== QR CODE DISPLAY ==================
+function displayQR(qr) {
+  console.log("\n" + "=".repeat(60));
+  console.log("📱 WHATSAPP QR CODE");
+  console.log("=".repeat(60));
+  console.log("\nSCAN WITH YOUR PHONE:");
+  console.log("1. Open WhatsApp");
+  console.log("2. Tap Settings → Linked Devices");
+  console.log("3. Tap Link a Device");
+  console.log("4. Point camera at QR code below");
+  console.log("\nQR CODE:");
+  console.log("=".repeat(60));
+  
+  // Generate clean QR code
+  qrcode.generate(qr, { small: true }, function (qrcode) {
+    console.log(qrcode);
+  });
+  
+  console.log("=".repeat(60));
+  console.log("\nIf QR doesn't scan, use this URL:");
+  console.log(`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`);
+  console.log("=".repeat(60));
 }
 
 // ================== BOT CONNECTION ==================
 async function connectToWhatsApp() {
-  console.log(`\n[${formatTime()}] 🔄 Initializing WhatsApp connection...`);
+  console.log(`\n🔄 Initializing WhatsApp connection...`);
   
   // Use auth state
   const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
@@ -105,16 +78,16 @@ async function connectToWhatsApp() {
   const isAuthenticated = state.creds.registered;
   
   if (isAuthenticated) {
-    console.log(`[${formatTime()}] ✅ Already logged in as: ${state.creds.me?.id || "Unknown"}`);
+    console.log(`✅ Already logged in as: ${state.creds.me?.id || "Unknown"}`);
   } else {
-    console.log(`[${formatTime()}] ⚠️  Not authenticated. Will request pairing code.`);
+    console.log(`⚠️ Not authenticated. QR code will be shown.`);
   }
 
   // Create socket
   const sock = makeWASocket({
     auth: state,
-    logger: pino({ level: "fatal" }), // Minimal logging
-    printQRInTerminal: false,
+    logger: pino({ level: "fatal" }),
+    printQRInTerminal: false, // We'll handle QR ourselves
     browser: Browsers.ubuntu("Chrome"),
     version: [2, 2413, 1],
     connectTimeoutMs: 60000,
@@ -133,73 +106,52 @@ async function connectToWhatsApp() {
 
   // Handle connection updates
   sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+    
+    // Display QR code
+    if (qr) {
+      displayQR(qr);
+    }
     
     if (connection === "open") {
-      console.log(`\n[${formatTime()}] ✅ WHATSAPP CONNECTED SUCCESSFULLY!`);
-      console.log(`[${formatTime()}] 🤖 Bot is now online and ready!`);
+      console.log(`\n✅ WHATSAPP CONNECTED SUCCESSFULLY!`);
+      console.log(`🤖 Bot is now online and ready!`);
       
       // Send welcome message to owner
       try {
         await sock.sendMessage("919233137736@s.whatsapp.net", {
           text: "🤖 *Mizo RP Bot* is now online!\n\nType /help to see available commands."
         });
-        console.log(`[${formatTime()}] 📨 Startup message sent to owner`);
+        console.log(`📨 Startup message sent to owner`);
       } catch (e) {
-        console.log(`[${formatTime()}] Note: Could not send startup message`);
+        console.log(`Note: Could not send startup message`);
       }
     }
 
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const reason = lastDisconnect?.error?.output?.payload?.error || "Unknown";
       
-      console.log(`\n[${formatTime()}] ❌ Connection closed: ${statusCode} (${reason})`);
+      console.log(`\n❌ Connection closed: ${statusCode}`);
       
-      // Handle specific disconnect reasons
       if (statusCode === DisconnectReason.loggedOut) {
-        console.log(`[${formatTime()}] 🚨 Logged out. Delete auth_info_baileys folder and restart.`);
+        console.log(`🚨 Logged out. Delete auth_info_baileys folder and restart.`);
         process.exit(0);
       } else if (statusCode === 405) {
-        console.log(`[${formatTime()}] ⚠️  WhatsApp rejected connection (405).`);
-        console.log(`[${formatTime()}] 💡 Possible solutions:`);
-        console.log(`[${formatTime()}]   1. Wait 5-10 minutes`);
-        console.log(`[${formatTime()}]   2. Restart the bot from Render dashboard`);
-        console.log(`[${formatTime()}]   3. Use a different phone number`);
-        console.log(`[${formatTime()}] ⏳ Waiting 60 seconds...`);
+        console.log(`⚠️  WhatsApp rejected connection (405).`);
+        console.log(`⏳ Waiting 60 seconds...`);
         await delay(60000);
-      } else if (statusCode === 429) {
-        console.log(`[${formatTime()}] ⚠️  Rate limited. Waiting 2 minutes...`);
-        await delay(120000);
       }
       
       // Auto-reconnect with delay
-      console.log(`[${formatTime()}] 🔄 Attempting to reconnect in 10 seconds...`);
+      console.log(`🔄 Attempting to reconnect in 10 seconds...`);
       await delay(10000);
       connectToWhatsApp();
     }
 
     if (connection === "connecting") {
-      console.log(`[${formatTime()}] 🔗 Connecting to WhatsApp...`);
+      console.log(`🔗 Connecting to WhatsApp...`);
     }
   });
-
-  // If not authenticated, request pairing code
-  if (!isAuthenticated) {
-    console.log(`\n[${formatTime()}] 📱 Starting authentication process...`);
-    
-    // Wait a bit for connection to establish
-    await delay(3000);
-    
-    // Request pairing code
-    const pairingSuccess = await handlePairing(sock);
-    
-    if (!pairingSuccess) {
-      console.log(`[${formatTime()}] ⏳ Retrying pairing in 30 seconds...`);
-      await delay(30000);
-      await handlePairing(sock);
-    }
-  }
 
   // ================== MESSAGE HANDLING ==================
   sock.ev.on("messages.upsert", async ({ messages }) => {
@@ -215,7 +167,7 @@ async function connectToWhatsApp() {
 
       if (!text.trim()) return;
 
-      console.log(`[${formatTime()}] 📨 Message from ${from.split("@")[0]}: ${text.substring(0, 50)}...`);
+      console.log(`📨 Message from ${from.split("@")[0]}: ${text.substring(0, 50)}...`);
 
       const uid = from.split("@")[0];
       const userRef = ref(db, "users/" + uid);
@@ -232,7 +184,7 @@ async function connectToWhatsApp() {
           xp: 0
         };
         await set(userRef, user);
-        console.log(`[${formatTime()}] 👤 New user registered: ${uid}`);
+        console.log(`👤 New user registered: ${uid}`);
       }
 
       const lowerText = text.toLowerCase().trim();
@@ -326,118 +278,15 @@ async function connectToWhatsApp() {
       
       // Ping command
       else if (lowerText === "/ping" || lowerText === "!ping") {
-        const startTime = Date.now();
-        await sock.sendMessage(from, { text: "🏓 Pong!" });
-        const latency = Date.now() - startTime;
-        
         await sock.sendMessage(from, {
-          text: `📊 *Bot Status*\n\n` +
-                `⏱️ Latency: ${latency}ms\n` +
-                `🟢 Status: Online\n` +
-                `📅 Uptime: ${process.uptime().toFixed(0)}s\n` +
-                `👤 Users: ${Object.keys((await get(ref(db, "users"))).val() || {}).length}`
-        });
-      }
-      
-      // Admin: Add cash
-      else if (lowerText.startsWith("/addcash") && from === "919233137736@s.whatsapp.net") {
-        const parts = text.split(" ");
-        if (parts.length >= 3) {
-          const target = parts[1].replace("@s.whatsapp.net", "").replace("@", "");
-          const amount = parseInt(parts[2]);
-          
-          if (!isNaN(amount) && amount > 0) {
-            const targetRef = ref(db, "users/" + target);
-            const targetUser = (await get(targetRef)).val() || { 
-              cash: 0, 
-              role: "citizen",
-              specialId: generateId(3)
-            };
-            
-            targetUser.cash = (targetUser.cash || 0) + amount;
-            await set(targetRef, targetUser);
-            
-            await sock.sendMessage(from, {
-              text: `✅ *Admin Action*\n\n` +
-                    `💰 Added $${amount} to ${target}\n` +
-                    `📊 New balance: $${targetUser.cash}`
-            });
-            
-            // Notify the user if possible
-            try {
-              await sock.sendMessage(`${target}@s.whatsapp.net`, {
-                text: `🎉 *Admin Gift!*\n\n` +
-                      `💰 You received $${amount} from admin\n` +
-                      `📈 New balance: $${targetUser.cash}`
-              });
-            } catch (e) {
-              console.log(`Could not notify user ${target}`);
-            }
-          }
-        }
-      }
-      
-      // Admin: Set role
-      else if (lowerText.startsWith("/setrole") && from === "919233137736@s.whatsapp.net") {
-        const parts = text.split(" ");
-        if (parts.length >= 3) {
-          const target = parts[1].replace("@s.whatsapp.net", "").replace("@", "");
-          const role = parts.slice(2).join(" ");
-          
-          const targetRef = ref(db, "users/" + target);
-          const targetUser = (await get(targetRef)).val() || { 
-            cash: 10000, 
-            role: "citizen",
-            specialId: generateId(3)
-          };
-          
-          targetUser.role = role;
-          await set(targetRef, targetUser);
-          
-          await sock.sendMessage(from, {
-            text: `✅ *Role Updated*\n\n` +
-                  `👤 User: ${target}\n` +
-                  `🏷️ New Role: ${role}`
-          });
-        }
-      }
-      
-      // Pair command (for owner to get new code)
-      else if (lowerText === "/pair" && from === "919233137736@s.whatsapp.net") {
-        await sock.sendMessage(from, {
-          text: `🔐 *Requesting new pairing code...*`
-        });
-        
-        const success = await handlePairing(sock);
-        
-        if (success) {
-          await sock.sendMessage(from, {
-            text: `✅ New pairing code generated!\nCheck the bot logs for the code.`
-          });
-        }
-      }
-      
-      // Unknown command
-      else if (text.startsWith("/") || text.startsWith("!")) {
-        await sock.sendMessage(from, {
-          text: `❓ *Unknown Command*\n\n` +
-                `Command "${text.split(" ")[0]}" not recognized.\n` +
-                `Type /help to see available commands.`
+          text: `🏓 Pong!\n` +
+                `🤖 Bot is online and working!\n` +
+                `⏱️ Uptime: ${process.uptime().toFixed(0)} seconds`
         });
       }
 
     } catch (error) {
-      console.error(`[${formatTime()}] Error processing message:`, error.message);
-    }
-  });
-
-  // Handle group participants update
-  sock.ev.on("group-participants.update", async ({ id, participants, action }) => {
-    if (action === "add") {
-      await sock.sendMessage(id, {
-        text: `👋 Welcome ${participants.map(p => `@${p.split("@")[0]}`).join(", ")} to the group!\n\n` +
-              `Type /help to see Mizo RP Bot commands.`
-      });
+      console.error(`Error processing message:`, error.message);
     }
   });
 
@@ -454,47 +303,26 @@ async function startBot() {
   console.log(`🌐 Port: ${port}`);
   console.log("=".repeat(60));
   
-  let retryCount = 0;
-  const maxRetries = 5;
-  
-  while (retryCount < maxRetries) {
-    try {
-      console.log(`\n[${formatTime()}] Attempt ${retryCount + 1}/${maxRetries}`);
-      await connectToWhatsApp();
-      break; // Success, exit loop
-    } catch (error) {
-      retryCount++;
-      console.error(`[${formatTime()}] ❌ Attempt ${retryCount} failed:`, error.message);
-      
-      if (retryCount >= maxRetries) {
-        console.log(`[${formatTime()}] ⚠️  Max retries reached. Bot will restart in 5 minutes.`);
-        await delay(300000); // 5 minutes
-        retryCount = 0; // Reset counter
-      } else {
-        const waitTime = retryCount * 30000; // 30s, 60s, 90s...
-        console.log(`[${formatTime()}] ⏳ Retrying in ${waitTime/1000} seconds...`);
-        await delay(waitTime);
-      }
-    }
+  try {
+    await connectToWhatsApp();
+  } catch (error) {
+    console.error(`❌ Bot startup failed:`, error.message);
+    console.log(`🔄 Restarting in 30 seconds...`);
+    await delay(30000);
+    startBot();
   }
 }
 
 // Graceful shutdown
 process.on("SIGINT", () => {
-  console.log(`\n[${formatTime()}] 👋 Shutting down gracefully...`);
+  console.log(`\n👋 Shutting down gracefully...`);
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
-  console.log(`\n[${formatTime()}] 👋 Received SIGTERM, shutting down...`);
+  console.log(`\n👋 Received SIGTERM, shutting down...`);
   process.exit(0);
 });
-
-// Auto-restart every 12 hours to prevent issues
-setInterval(() => {
-  console.log(`\n[${formatTime()}] 🔄 Scheduled restart for maintenance...`);
-  process.exit(0);
-}, 12 * 60 * 60 * 1000);
 
 // Start the bot
 startBot();
