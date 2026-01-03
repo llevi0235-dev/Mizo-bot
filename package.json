@@ -5,14 +5,14 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "clean": "rm -rf auth_info_baileys",
-    "fresh": "rm -rf auth_info_baileys node_modules && npm install"
+    "clean": "rm -rf session",
+    "get-session": "node getSession.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "6.4.0",
+    "@whiskeysockets/baileys": "^6.7.9",
     "firebase": "^11.0.2",
-    "pino": "^8.15.0",
     "express": "^4.21.0",
+    "puppeteer": "^22.11.1",
     "qrcode-terminal": "^0.12.0"
   },
   "engines": {
