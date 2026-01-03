@@ -1,5 +1,5 @@
 // ==========================================
-// MIZO ROLEPLAY BOT — WORKING VERSION
+// MIZO ROLEPLAY BOT — QR CODE FIXED VERSION
 // ==========================================
 
 const {
@@ -7,10 +7,8 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   delay,
-  fetchLatestBaileysVersion,
   Browsers
 } = require("@whiskeysockets/baileys");
-const qrcode = require("qrcode-terminal");
 const pino = require("pino");
 const express = require("express");
 
@@ -43,6 +41,25 @@ function generateId(len) {
   ).join("");
 }
 
+// ================== QR CODE GENERATOR ==================
+function generateQRCode(qr) {
+  console.log("\n" + "=".repeat(60));
+  console.log("📱 WHATSAPP QR CODE FOR PAIRING");
+  console.log("=".repeat(60));
+  console.log("\nINSTRUCTIONS:");
+  console.log("1. Open WhatsApp on your phone");
+  console.log("2. Go to Settings → Linked Devices → Link a Device");
+  console.log("3. Point your camera at the QR code below");
+  console.log("\nQR CODE URL:");
+  console.log("https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(qr));
+  console.log("\nOR scan this simplified code:");
+  
+  // Create a simple text-based QR for terminals
+  const smallQR = qr.replace(/[^0-9]/g, '').substring(0, 20);
+  console.log("\nScan code from: " + smallQR);
+  console.log("\n" + "=".repeat(60));
+}
+
 // ================== BOT CONNECTION ==================
 async function connectToWhatsApp() {
   console.log("🔄 Initializing WhatsApp connection...");
@@ -52,13 +69,14 @@ async function connectToWhatsApp() {
   // Check if already logged in
   if (state.creds.registered) {
     console.log("✅ Already authenticated with WhatsApp");
+    console.log("📱 Connected as: " + (state.creds.me?.id || "Unknown"));
   } else {
-    console.log("⚠️ Not authenticated. QR code will be shown...");
+    console.log("⚠️ Not authenticated. Waiting for QR code...");
   }
 
   const sock = makeWASocket({
     auth: state,
-    logger: pino({ level: "fatal" }), // Minimal logging
+    logger: pino({ level: "silent" }), // No logs to avoid clutter
     printQRInTerminal: false,
     browser: Browsers.ubuntu("Chrome"),
     version: [2, 2413, 1],
@@ -80,23 +98,32 @@ async function connectToWhatsApp() {
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
     
-    // Handle QR code
+    // Handle QR code - SIMPLIFIED VERSION
     if (qr) {
-      console.log("\n" + "=".repeat(50));
-      console.log("📱 SCAN THIS QR CODE WITH YOUR PHONE");
-      console.log("WhatsApp → Linked Devices → Link a Device");
-      console.log("=".repeat(50));
-      qrcode.generate(qr, { small: true });
-      console.log("\nWaiting for scan...");
+      console.log("\n" + "=".repeat(60));
+      console.log("📱 WHATSAPP QR CODE GENERATED");
+      console.log("=".repeat(60));
+      console.log("\nTO SCAN:");
+      console.log("1. Open WhatsApp → Settings → Linked Devices → Link a Device");
+      console.log("2. Use this URL to get QR code:");
+      console.log("\nhttps://qrcode.tec-it.com/API/QRCode?data=" + encodeURIComponent(qr));
+      console.log("\nOr copy this code and use any QR generator:");
+      console.log("\nCODE: " + qr.substring(0, 100) + "...");
+      console.log("\n" + "=".repeat(60));
+      
+      // Alternative: Save QR to a file (for debugging)
+      console.log("\n💡 TIP: Copy the QR code data above and use:");
+      console.log("https://qr.io/ to generate a scannable QR code");
     }
 
     if (connection === "open") {
-      console.log("✅ WhatsApp connected successfully!");
+      console.log("\n✅ WhatsApp connected successfully!");
+      console.log("🤖 Bot is now online and ready!");
       
       // Send welcome message to owner
       try {
         await sock.sendMessage("919233137736@s.whatsapp.net", {
-          text: "🤖 Mizo RP Bot is now online and ready!"
+          text: "🤖 Mizo RP Bot is now online!\n\nType /help to see commands."
         });
         console.log("📨 Startup message sent to owner");
       } catch (e) {
@@ -106,25 +133,23 @@ async function connectToWhatsApp() {
 
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const reason = lastDisconnect?.error?.output?.payload?.error || "Unknown";
-      console.log(`❌ Connection closed: ${statusCode} (${reason})`);
+      console.log(`❌ Connection closed: ${statusCode}`);
       
-      // Handle specific disconnect reasons
       if (statusCode === DisconnectReason.loggedOut) {
-        console.log("🚨 Logged out from WhatsApp. Please delete auth_info_baileys folder.");
+        console.log("🚨 Logged out from WhatsApp. Delete auth_info_baileys folder and restart.");
         process.exit(0);
       } else if (statusCode === 405) {
-        console.log("⚠️  WhatsApp rejected connection (405). Possible temporary block.");
-        console.log("🕐 Waiting 30 seconds before retry...");
-        await delay(30000);
-      } else if (statusCode === 429) {
-        console.log("⚠️  Rate limited. Waiting 60 seconds...");
+        console.log("⚠️  WhatsApp rejected connection (405). This usually means:");
+        console.log("   - Your IP is temporarily blocked");
+        console.log("   - Too many connection attempts");
+        console.log("   - WhatsApp server issue");
+        console.log("🕐 Waiting 60 seconds before retry...");
         await delay(60000);
       }
       
-      // Reconnect after delay
+      // Reconnect
       console.log("🔄 Attempting to reconnect...");
-      await delay(10000);
+      await delay(15000);
       connectToWhatsApp();
     }
 
@@ -216,43 +241,6 @@ async function connectToWhatsApp() {
                 `🌐 Bot is online and working!`
         });
       }
-      
-      else if (lowerText.startsWith("/addcash") && from === "919233137736@s.whatsapp.net") {
-        const parts = text.split(" ");
-        if (parts.length >= 3) {
-          const target = parts[1].replace("@s.whatsapp.net", "");
-          const amount = parseInt(parts[2]);
-          
-          if (!isNaN(amount)) {
-            const targetRef = ref(db, "users/" + target);
-            const targetUser = (await get(targetRef)).val() || { cash: 0, role: "citizen" };
-            targetUser.cash = (targetUser.cash || 0) + amount;
-            await set(targetRef, targetUser);
-            
-            await sock.sendMessage(from, {
-              text: `✅ Added $${amount} to user ${target}\n` +
-                    `💰 New balance: $${targetUser.cash}`
-            });
-          }
-        }
-      }
-      
-      else if (lowerText.startsWith("/setrole") && from === "919233137736@s.whatsapp.net") {
-        const parts = text.split(" ");
-        if (parts.length >= 3) {
-          const target = parts[1].replace("@s.whatsapp.net", "");
-          const role = parts[2];
-          
-          const targetRef = ref(db, "users/" + target);
-          const targetUser = (await get(targetRef)).val() || { cash: 10000, role: "citizen" };
-          targetUser.role = role;
-          await set(targetRef, targetUser);
-          
-          await sock.sendMessage(from, {
-            text: `✅ Set role of ${target} to: ${role}`
-          });
-        }
-      }
 
     } catch (error) {
       console.error("Error processing message:", error.message);
@@ -264,15 +252,20 @@ async function connectToWhatsApp() {
 
 // ================== STARTUP ==================
 async function startBot() {
+  console.log("🚀 Starting Mizo Roleplay Bot...");
+  console.log("📅 " + new Date().toLocaleString());
+  console.log("🔧 Node version: " + process.version);
+  console.log("\n" + "=".repeat(60));
+  console.log("IMPORTANT: If you see 405 error, wait 5-10 minutes");
+  console.log("then restart the bot from Render dashboard.");
+  console.log("=".repeat(60) + "\n");
+  
   try {
-    console.log("🚀 Starting Mizo Roleplay Bot...");
-    console.log("📅 " + new Date().toLocaleString());
-    console.log("🔧 Node version: " + process.version);
     await connectToWhatsApp();
   } catch (error) {
     console.error("🔥 Bot startup failed:", error.message);
-    console.log("🔄 Restarting in 10 seconds...");
-    await delay(10000);
+    console.log("🔄 Restarting in 30 seconds...");
+    await delay(30000);
     startBot();
   }
 }

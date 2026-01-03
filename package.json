@@ -5,19 +5,13 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "clean": "rm -rf auth_info_baileys node_modules package-lock.json",
-    "setup": "npm install && echo 'Setup complete'"
+    "clean": "rm -rf auth_info_baileys"
   },
-  "keywords": ["whatsapp", "bot", "roleplay", "mizo"],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "@whiskeysockets/baileys": "6.6.0",
     "firebase": "^11.0.2",
     "pino": "^9.5.0",
-    "express": "^4.21.0",
-    "qrcode-terminal": "^0.12.0"
+    "express": "^4.21.0"
   },
   "engines": {
     "node": ">=18.0.0"
