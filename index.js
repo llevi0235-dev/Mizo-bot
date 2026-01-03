@@ -1,27 +1,27 @@
 // ==========================================
-// MIZO ROLEPLAY BOT - RENDER VERSION (FIXED)
+// MIZO ROLEPLAY BOT — FINAL STABLE VERSION
 // ==========================================
 
 const {
   default: makeWASocket,
   useMultiFileAuthState,
-  DisconnectReason,
-  delay
+  DisconnectReason
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
+const express = require("express");
 const { initializeApp } = require("firebase/app");
 const { getDatabase, ref, get, set, update } = require("firebase/database");
-const express = require("express");
 
-// ================== GLOBAL FLAGS ==================
+// ================== GLOBAL STATE ==================
+let sock;
 let pairingRequested = false;
 
 // ================== RENDER KEEPALIVE ==================
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 10000;
 
-app.get("/", (req, res) => res.send("Mizo RP Bot is Active!"));
+app.get("/", (_, res) => res.send("Mizo RP Bot is Active"));
 app.listen(port, () => console.log(`Server listening on port ${port}`));
 
 // ================== FIREBASE ==================
@@ -40,71 +40,67 @@ const db = getDatabase(firebaseApp);
 
 // ================== UTILS ==================
 function generateId(length) {
-  let result = "";
   const chars = "0123456789";
+  let out = "";
   for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    out += chars[Math.floor(Math.random() * chars.length)];
   }
-  return result;
+  return out;
 }
 
-// ================== BOT START ==================
+// ================== START BOT ==================
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
 
-  const sock = makeWASocket({
-    logger: pino({ level: "silent" }),
-    printQRInTerminal: false,
+  sock = makeWASocket({
     auth: state,
+    printQRInTerminal: false,
+    logger: pino({ level: "silent" }),
     browser: ["MizoRP", "Chrome", "1.0.0"]
   });
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ================== CONNECTION ==================
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect } = update;
+  // ========== PAIRING (ONLY ONCE, NO LOOP) ==========
+  if (!state.creds.registered && !pairingRequested) {
+    pairingRequested = true;
+    const phoneNumber = "919233137736";
 
-    if (connection === "open") {
-      console.log("✅ BOT CONNECTED SUCCESSFULLY!");
-
-      if (!sock.authState.creds.registered && !pairingRequested) {
-        pairingRequested = true;
-
-        const phoneNumber = "919233137736"; // YOUR NUMBER
-
-        await delay(3000); // allow socket to stabilize
-
-        try {
-          const code = await sock.requestPairingCode(phoneNumber);
-          console.log("\n============================================");
-          console.log("🚨 PAIRING CODE GENERATED 🚨");
-          console.log(`CODE: ${code}`);
-          console.log("============================================\n");
-        } catch (err) {
-          console.error("❌ Pairing failed:", err);
-        }
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode(phoneNumber);
+        console.log("\n====================================");
+        console.log("🚨 PAIRING CODE 🚨");
+        console.log("CODE:", code);
+        console.log("====================================\n");
+      } catch (e) {
+        console.error("❌ Pairing error:", e);
       }
+    }, 5000);
+  }
+
+  // ========== CONNECTION STATUS ==========
+  sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
+    if (connection === "open") {
+      console.log("✅ WhatsApp connected");
     }
 
     if (connection === "close") {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !==
-        DisconnectReason.loggedOut;
+      const reason = lastDisconnect?.error?.output?.statusCode;
+      console.log("❌ Connection closed. Reason:", reason);
 
-      console.log("Connection closed, reconnecting...", shouldReconnect);
-
-      if (shouldReconnect) {
-        startBot();
+      if (reason === DisconnectReason.loggedOut) {
+        console.log("❌ Logged out. Delete auth_info_baileys and restart.");
       }
+      // ❗ NO RECURSION — Baileys handles reconnect
     }
   });
 
-  // ================== MESSAGE HANDLER ==================
-  sock.ev.on("messages.upsert", async (m) => {
+  // ========== MESSAGE HANDLER ==========
+  sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
-      const msg = m.messages[0];
-      if (!msg.message || msg.key.fromMe) return;
+      const msg = messages[0];
+      if (!msg?.message || msg.key.fromMe) return;
 
       const from = msg.key.remoteJid;
       const text =
@@ -115,7 +111,7 @@ async function startBot() {
       if (!text.trim()) return;
 
       const senderId = from.split("@")[0];
-      const lowerText = text.toLowerCase();
+      const lower = text.toLowerCase();
 
       const userRef = ref(db, "users/" + senderId);
       const snap = await get(userRef);
@@ -131,89 +127,69 @@ async function startBot() {
         await set(userRef, user);
       }
 
-      // ================== COMMANDS ==================
-      if (lowerText === "/menu") {
+      if (lower === "/menu") {
         return sock.sendMessage(from, {
           text:
-            "📜 *GAME MENU* 📜\n\n" +
-            "1️⃣ /status - Stats\n" +
-            "2️⃣ /crlps - Police\n" +
-            "3️⃣ /crltf - Thief\n" +
-            "4️⃣ /crlbs - Businessman\n" +
-            "5️⃣ /ubank - Universal Bank"
+            "📜 GAME MENU\n\n" +
+            "/status\n" +
+            "/crlps\n" +
+            "/crltf\n" +
+            "/crlbs"
         });
       }
 
-      if (lowerText === "/status" || lowerText === "/stats") {
-        let displayId = "N/A";
-
-        if (user.role === "citizen")
-          displayId = (user.specialId || "000").slice(0, 2) + "?";
-
-        if (user.role === "businessman")
-          displayId = (user.specialId || "000").slice(0, 3) + "???";
-
-        if (user.role === "police") displayId = "No ID";
-
+      if (lower === "/status") {
         return sock.sendMessage(from, {
           text:
-            `📊 *STATUS*\n` +
-            `👤 Role: ${user.role.toUpperCase()}\n` +
+            `👤 Role: ${user.role}\n` +
             `💰 Cash: ${user.cash}\n` +
-            `🆔 ID: ${displayId}`
+            `🆔 ID: ${user.specialId || "N/A"}`
         });
       }
 
-      if (lowerText === "/crlps")
+      if (lower === "/crlps")
         return sock.sendMessage(from, {
           text: await changeRole(senderId, user, "police")
         });
 
-      if (lowerText === "/crltf")
+      if (lower === "/crltf")
         return sock.sendMessage(from, {
           text: await changeRole(senderId, user, "thief")
         });
 
-      if (lowerText === "/crlbs")
+      if (lower === "/crlbs")
         return sock.sendMessage(from, {
           text: await changeRole(senderId, user, "businessman")
         });
     } catch (err) {
-      console.error("Error processing message:", err);
+      console.error("Message error:", err);
     }
   });
 }
 
-// ================== GAME LOGIC ==================
-async function changeRole(uid, currentUser, newRole) {
+// ================== ROLE LOGIC ==================
+async function changeRole(uid, user, role) {
   const now = Date.now();
-
-  if (
-    currentUser.lastRoleChange &&
-    now - currentUser.lastRoleChange < 172800000
-  ) {
-    return "❌ FAILED: You must wait 2 days to change roles.";
+  if (user.lastRoleChange && now - user.lastRoleChange < 172800000) {
+    return "❌ Wait 2 days before changing role.";
   }
 
-  const updates = {
-    role: newRole,
-    lastRoleChange: now
-  };
+  const updates = { role, lastRoleChange: now };
 
-  if (newRole === "businessman") {
+  if (role === "businessman") {
     updates.specialId = generateId(6);
-    if (!currentUser.wasBusinessman) {
-      updates.cash = (currentUser.cash || 0) + 500000;
+    if (!user.wasBusinessman) {
+      updates.cash = (user.cash || 0) + 500000;
       updates.wasBusinessman = true;
     }
-  } else if (newRole === "citizen" || newRole === "thief") {
-    updates.specialId = generateId(3);
-  } else if (newRole === "police") {
+  } else if (role === "police") {
     updates.specialId = null;
+  } else {
+    updates.specialId = generateId(3);
   }
 
   await update(ref(db, "users/" + uid), updates);
-  return `✅ SUCCESS: Role changed to ${newRole.toUpperCase()}.`;
+  return `✅ Role changed to ${role.toUpperCase()}`;
 }
 
 // ================== INCOME LOOP ==================
@@ -222,22 +198,16 @@ setInterval(async () => {
   if (!snap.exists()) return;
 
   const updates = {};
-  const users = snap.val();
-
-  for (const uid in users) {
-    const user = users[uid];
+  for (const [uid, user] of Object.entries(snap.val())) {
     let income = 0;
-
     if (user.role === "citizen") income = 400;
     if (user.role === "police") income = 450;
     if (user.role === "businessman") income = 1000;
-
-    if (income > 0) {
+    if (income > 0)
       updates[`users/${uid}/cash`] = (user.cash || 0) + income;
-    }
   }
 
-  if (Object.keys(updates).length > 0) {
+  if (Object.keys(updates).length) {
     await update(ref(db), updates);
   }
 }, 30 * 60 * 1000);
