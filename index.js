@@ -1,6 +1,14 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const admin = require('firebase-admin');
-const cron = require('node-cron');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
+const pino = require("pino");
+const express = require("express");
+const admin = require("firebase-admin");
+const cron = require("node-cron");
+const app = express();
+
+// --- RENDER SERVER FIX ---
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Mizo RP Bot is Active!'));
+app.listen(PORT, '0.0.0.0', () => console.log(`Server listening on port ${PORT}`));
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -32,25 +40,52 @@ const ROLES = {
   BUSINESSMAN: 'businessman'
 };
 
-// Initialize WhatsApp Client
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  }
-});
-
 const activeUsers = new Map();
+let sock; // Global variable for the connection
 
-client.on('qr', (qr) => {
-  console.log('QR Code received. Scan it with WhatsApp.');
-});
+async function startBot() {
+  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
 
-client.on('ready', () => {
-  console.log('Bot is ready!');
-  startAutoIncome();
-});
+  sock = makeWASocket({
+    logger: pino({ level: "silent" }),
+    printQRInTerminal: false,
+    auth: state,
+    browser: ["Ubuntu", "Chrome", "20.0.04"],
+  });
+
+  // --- PAIRING CODE LOGIC ---
+  if (!sock.authState.creds.registered) {
+    const phoneNumber = "919233137736"; // YOUR NUMBER
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode(phoneNumber);
+        console.log("\n============================================");
+        console.log("🚨 PAIRING CODE: " + code);
+        console.log("============================================\n");
+      } catch (err) { console.log("Pairing error: " + err); }
+    }, 5000);
+  }
+
+  sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect } = update;
+    if (connection === "close") {
+      const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+      if (shouldReconnect) startBot();
+    } else if (connection === "open") {
+      console.log("✅ BOT CONNECTED!");
+      startAutoIncome();
+    }
+  });
+
+  sock.ev.on("messages.upsert", async (m) => {
+    const info = m.messages[0];
+    if (!info.message || info.key.fromMe) return;
+    await handleGameLogic(info);
+  });
+}
+startBot();
+
 
 // Helper Functions
 function isAdmin(phoneNumber) {
@@ -233,7 +268,23 @@ function startAutoIncome() {
 }
 
 // Message Handler
-client.on('message', async (msg) => {
+async function handleGameLogic(info) {
+    // Adapter to make Baileys look like the old library
+    const from = info.key.remoteJid;
+    const bodyText = (info.message.conversation || info.message.extendedTextMessage?.text || "").trim();
+    const senderNum = from.split('@')[0];
+    const senderName = info.pushName || senderNum;
+    
+    // Create 'msg' object
+    const msg = {
+        body: bodyText,
+        reply: async (text) => await sock.sendMessage(from, { text: text }, { quoted: info }),
+        getChat: async () => ({
+            isGroup: from.endsWith('@g.us'),
+            participants: from.endsWith('@g.us') ? (await sock.groupMetadata(from)).participants.map(p => ({ id: { user: p.id.split('@')[0] } })) : []
+        }),
+        getContact: async () => ({ number: senderNum, pushname: senderName, name: senderName })
+    };
   try {
     const chat = await msg.getChat();
     const contact = await msg.getContact();
@@ -866,6 +917,4 @@ client.on('message', async (msg) => {
     console.error('Error:', error);
     await msg.reply('An error occurred. Please try again.');
   }
-});
-
-client.initialize();
+}
