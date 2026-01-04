@@ -66,45 +66,53 @@ async function startBot() {
     browser: ["Chrome", "Windows", "10"],
   });
 
-  // --- PAIRING CODE GENERATION ---
-  // We added '!pairingCodeRequested' to stop the double code spam
+// --- PAIRING CODE GENERATION (DEBUG VERSION) ---
 if (!sock.authState.creds.registered && !pairingCodeRequested) {
-    pairingCodeRequested = true; // Lock it immediately
+    pairingCodeRequested = true;
     
-    // Wait for connection to be ready before requesting code
+    console.log("🔍 DEBUG: Starting pairing process...");
+    console.log("🔍 Phone number to use:", BOT_NUMBER);
+    
     setTimeout(async () => {
-        console.log("⚡ REQUESTING PAIRING CODE...");
-        try {
-            // USE THIS FORMAT:
-            const phoneNumber = "+919233137736"; // Country code + number
-            
-            const code = await sock.requestPairingCode(phoneNumber);
-            console.log("\n" + "=".repeat(50));
-            console.log("👇👇👇 PAIRING CODE BELOW 👇👇👇");
-            console.log("🚨 CODE: " + code);
-            console.log("👆👆👆 PAIRING CODE ABOVE 👆👆👆");
-            console.log("=".repeat(50) + "\n");
-            
-            // IMPORTANT: Tell user EXACTLY what to enter
-            console.log("ℹ️ INSTRUCTIONS FOR WHATSAPP WEB:");
-            console.log("1. Click 'Link a device'");
-            console.log("2. Enter phone number: +91 9233137736");
-            console.log("3. Enter this code: " + code);
-            
-        } catch (err) { 
-            console.log("❌ ERROR GETTING PAIRING CODE:");
-            console.log("Error:", err.message);
-            
-            // Try alternative format if first fails
-            console.log("\n🔄 Trying alternative phone format...");
+        console.log("⚡ REQUESTING PAIRING CODE NOW...");
+        
+        // Try different formats one by one
+        const testFormats = [
+            { name: "Raw number", value: "919233137736" },
+            { name: "With @s.whatsapp.net", value: "919233137736@s.whatsapp.net" },
+            { name: "Country code separate", value: "91" + "9233137736" },
+            { name: "With plus", value: "+919233137736" }
+        ];
+        
+        for (const format of testFormats) {
             try {
-                const code = await sock.requestPairingCode("+919233137736");
-                console.log("✅ ALTERNATIVE CODE: " + code);
-            } catch (err2) {
-                console.log("❌ Both formats failed");
+                console.log(`\n🔄 Trying: ${format.name} (${format.value})`);
+                const code = await sock.requestPairingCode(format.value);
+                console.log("=".repeat(50));
+                console.log("✅ SUCCESS! CODE: " + code);
+                console.log("=".repeat(50));
+                console.log("\n📱 USE THIS IN WHATSAPP DESKTOP APP:");
+                console.log("1. Open WhatsApp Desktop (NOT Web)");
+                console.log("2. Click 'Link a device'");
+                console.log("3. Click 'Link with phone number'");
+                console.log("4. Enter: +91 9233137736");
+                console.log("5. Enter code: " + code);
+                console.log("\n⏰ Code expires in 30 seconds!");
+                return; // Stop if successful
+            } catch (err) {
+                console.log(`❌ Failed: ${err.message}`);
             }
+            await delay(1000); // Wait 1 second between tries
         }
-    }, 3000); // 3 Seconds
+        
+        console.log("\n💀 ALL FORMATS FAILED!");
+        console.log("Possible reasons:");
+        console.log("1. WhatsApp blocking bot connections");
+        console.log("2. Number needs phone call verification");
+        console.log("3. Temporary WhatsApp server issue");
+        
+    }, 3000);
+}
 }
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("connection.update", (update) => {
