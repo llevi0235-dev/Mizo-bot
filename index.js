@@ -51,8 +51,7 @@ let sock;
 let pairingCodeRequested = false; 
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
-
+  const { state, saveCreds } = await useMultiFileAuthState("auth_session_v2");
   sock = makeWASocket({
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
