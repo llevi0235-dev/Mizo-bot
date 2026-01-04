@@ -43,7 +43,7 @@ admin.initializeApp({
 const db = admin.firestore();
 
 // Bot Configuration
-const BOT_NUMBER = '+919233137736';
+const BOT_NUMBER = '+918119081491';
 const ADMIN_NUMBER = '+919233137736';
 
 const ROLES = {
@@ -78,10 +78,10 @@ if (!sock.authState.creds.registered && !pairingCodeRequested) {
         
         // Try different formats one by one
         const testFormats = [
-            { name: "Raw number", value: "919233137736" },
-            { name: "With @s.whatsapp.net", value: "919233137736@s.whatsapp.net" },
-            { name: "Country code separate", value: "91" + "9233137736" },
-            { name: "With plus", value: "+919233137736" }
+            { name: "Raw number", value: "+918119081491" },
+            { name: "With @s.whatsapp.net", value: "+918119081491@s.whatsapp.net" },
+            { name: "Country code separate", value: "+918119081491 },
+            { name: "With plus", value: "+918119081491" }
         ];
         
         for (const format of testFormats) {
@@ -95,7 +95,7 @@ if (!sock.authState.creds.registered && !pairingCodeRequested) {
                 console.log("1. Open WhatsApp Desktop (NOT Web)");
                 console.log("2. Click 'Link a device'");
                 console.log("3. Click 'Link with phone number'");
-                console.log("4. Enter: +91 9233137736");
+                console.log("4. Enter: +918119081491");
                 console.log("5. Enter code: " + code);
                 console.log("\n⏰ Code expires in 30 seconds!");
                 return; // Stop if successful
