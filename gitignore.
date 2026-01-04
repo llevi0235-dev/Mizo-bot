@@ -1,10 +1,10 @@
 # Dependencies
 node_modules/
 
-# WhatsApp Session (CRITICAL: Do not remove this line)
+# WhatsApp Session (CRITICAL SECURITY)
 auth_info_baileys/
 
-# Game Database (To prevent overwriting player data)
+# Game Database (Keeps player money safe from overwrites)
 database.json
 
 # Logs and system files
