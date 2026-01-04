@@ -5,6 +5,18 @@ const admin = require("firebase-admin");
 const cron = require("node-cron");
 const app = express();
 const fs = require('fs');
+function clearOldSessions() {
+    const sessionDir = './auth_info_baileys';
+    if (fs.existsSync(sessionDir)) {
+        console.log('🧹 CLEARING OLD SESSION FILES...');
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+        console.log('✅ OLD SESSIONS CLEARED');
+    } else {
+        console.log('✅ NO OLD SESSIONS FOUND');
+    }
+}
+
+clearOldSessions();
 // FORCE LOGOUT: Delete old session to get a new code
 // --- RENDER SERVER FIX ---
 const PORT = process.env.PORT || 3000;
@@ -31,8 +43,8 @@ admin.initializeApp({
 const db = admin.firestore();
 
 // Bot Configuration
-const BOT_NUMBER = '919233137736';
-const ADMIN_NUMBER = '919233137736';
+const BOT_NUMBER = '+919233137736';
+const ADMIN_NUMBER = '+919233137736';
 
 const ROLES = {
   CITIZEN: 'citizen',
@@ -51,30 +63,49 @@ async function startBot() {
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
     auth: state,
-    browser: ["Ubuntu", "Chrome", "20.0.04"],
+    browser: ["Chrome", "Windows", "10"],
   });
 
   // --- PAIRING CODE GENERATION ---
   // We added '!pairingCodeRequested' to stop the double code spam
 if (!sock.authState.creds.registered && !pairingCodeRequested) {
     pairingCodeRequested = true; // Lock it immediately
-    const phoneNumber = "919233137736"; 
     
-        // --- FORCE PAIRING CODE (NO CHECKS) ---
+    // Wait for connection to be ready before requesting code
     setTimeout(async () => {
-      console.log("⚡ FORCE START: Requesting Pairing Code...");
-      try {
-        const phoneNumber = "919233137736"; // Defined here to be safe
-        const code = await sock.requestPairingCode(phoneNumber);
-        console.log("\n👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇");
-        console.log("🚨 CODE: " + code);
-        console.log("👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆\n");
-      } catch (err) { 
-          console.log("❌ ERROR GETTING CODE: " + err); 
-      }
+        console.log("⚡ REQUESTING PAIRING CODE...");
+        try {
+            // USE THIS FORMAT:
+            const phoneNumber = "+919233137736"; // Country code + number
+            
+            const code = await sock.requestPairingCode(phoneNumber);
+            console.log("\n" + "=".repeat(50));
+            console.log("👇👇👇 PAIRING CODE BELOW 👇👇👇");
+            console.log("🚨 CODE: " + code);
+            console.log("👆👆👆 PAIRING CODE ABOVE 👆👆👆");
+            console.log("=".repeat(50) + "\n");
+            
+            // IMPORTANT: Tell user EXACTLY what to enter
+            console.log("ℹ️ INSTRUCTIONS FOR WHATSAPP WEB:");
+            console.log("1. Click 'Link a device'");
+            console.log("2. Enter phone number: +91 9233137736");
+            console.log("3. Enter this code: " + code);
+            
+        } catch (err) { 
+            console.log("❌ ERROR GETTING PAIRING CODE:");
+            console.log("Error:", err.message);
+            
+            // Try alternative format if first fails
+            console.log("\n🔄 Trying alternative phone format...");
+            try {
+                const code = await sock.requestPairingCode("+919233137736");
+                console.log("✅ ALTERNATIVE CODE: " + code);
+            } catch (err2) {
+                console.log("❌ Both formats failed");
+            }
+        }
     }, 3000); // 3 Seconds
-  }
-
+}
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect } = update;
