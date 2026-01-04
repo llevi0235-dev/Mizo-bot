@@ -51,7 +51,7 @@ let sock;
 let pairingCodeRequested = false; 
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("auth_session_v2");
+  const { state, saveCreds } = await useMultiFileAuthState("mizo_final_v3");
   sock = makeWASocket({
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
