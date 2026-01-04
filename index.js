@@ -3,8 +3,8 @@ const pino = require('pino');
 const fs = require('fs');
 
 // --- CONFIGURATION ---
-const ADMIN_NUMBER = "91923313773"; // Admin number (without +)
-const OWNER_NUMBER = "919233137736"; // Bot Owner/Bank Controller
+const ADMIN_NUMBER = "91923313773"; // Admin number
+const OWNER_NUMBER = "919233137736"; // Bot Number
 const DB_FILE = './database.json';
 
 // --- DATABASE & STATE ---
@@ -145,18 +145,22 @@ async function startBot() {
         browser: ["Chrome", "Linux", ""]
     });
 
-    // PAIRING CODE LOGIC
+    // --- PAIRING CODE LOGIC (FIXED FOR DEPLOYMENT) ---
     if (!sock.authState.creds.me && !sock.authState.creds.registered) {
-        const question = (text) => new Promise(resolve => {
-            const readline = require('readline').createInterface({ input: process.stdin, output: process.stdout });
-            readline.question(text, answer => {
-                readline.close();
-                resolve(answer);
-            });
-        });
-        const phoneNumber = await question('Enter your phone number (e.g., 919233137736): ');
-        const code = await sock.requestPairingCode(phoneNumber);
-        console.log(`Your Pairing Code: ${code}`);
+        
+        // Your bot number hardcoded to prevent freezing
+        const phoneNumber = "919233137736"; 
+        
+        console.log(`\nRequesting pairing code for ${phoneNumber}... Please wait.`);
+
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode(phoneNumber);
+                console.log(`\n\nYOUR PAIRING CODE: ${code}\n\n`);
+            } catch (err) {
+                console.log("Error requesting code: ", err);
+            }
+        }, 3000);
     }
 
     sock.ev.on('creds.update', saveCreds);
@@ -294,8 +298,6 @@ async function startBot() {
                 if (mentionedJid && db.users[mentionedJid]) {
                     const target = db.users[mentionedJid];
                     
-                    // Simple logic: if guessed ID perfectly, 10% stole
-                    // If close, 2% or 1%
                     const realID = parseInt(target.id);
                     const diff = Math.abs(realID - guess);
                     let stolen = 0;
@@ -321,7 +323,7 @@ async function startBot() {
                     await sock.sendMessage(from, { text: txt("Tag a user to rob them! (e.g., @user/rob123)", "Mi rawk turin tag rawh! (e.g., @user/rob123)") });
                 }
             }
-        } // <--- THIEF BLOCK CLOSES HERE
+        } 
 
         // 4. POLICE COMMANDS
         if (user.role === 'police') {
