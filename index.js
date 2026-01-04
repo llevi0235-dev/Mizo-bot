@@ -77,41 +77,39 @@ if (!sock.authState.creds.registered && !pairingCodeRequested) {
         console.log("⚡ REQUESTING PAIRING CODE NOW...");
         
         // Try different formats one by one
-        const testFormats = [
-            { name: "Raw number", value: "+918119081491" },
-            { name: "With @s.whatsapp.net", value: "+918119081491@s.whatsapp.net" },
-            { name: "Country code separate", value: "+918119081491 },
-            { name: "With plus", value: "+918119081491" }
-        ];
-        
-        for (const format of testFormats) {
-            try {
-                console.log(`\n🔄 Trying: ${format.name} (${format.value})`);
-                const code = await sock.requestPairingCode(format.value);
-                console.log("=".repeat(50));
-                console.log("✅ SUCCESS! CODE: " + code);
-                console.log("=".repeat(50));
-                console.log("\n📱 USE THIS IN WHATSAPP DESKTOP APP:");
-                console.log("1. Open WhatsApp Desktop (NOT Web)");
-                console.log("2. Click 'Link a device'");
-                console.log("3. Click 'Link with phone number'");
-                console.log("4. Enter: +918119081491");
-                console.log("5. Enter code: " + code);
-                console.log("\n⏰ Code expires in 30 seconds!");
-                return; // Stop if successful
-            } catch (err) {
-                console.log(`❌ Failed: ${err.message}`);
-            }
-            await delay(1000); // Wait 1 second between tries
-        }
-        
-        console.log("\n💀 ALL FORMATS FAILED!");
-        console.log("Possible reasons:");
-        console.log("1. WhatsApp blocking bot connections");
-        console.log("2. Number needs phone call verification");
-        console.log("3. Temporary WhatsApp server issue");
-        
-    }, 3000);
+    const testFormats = [
+    { name: "Raw number", value: "918119081491" },
+    { name: "With @s.whatsapp.net", value: "918119081491@s.whatsapp.net" },
+    { name: "Country code separate", value: "+918119081491" }, // FIXED
+    { name: "With plus", value: "+918119081491" }
+];
+
+for (const format of testFormats) {
+    try {
+        console.log(`\n🔄 Trying: ${format.name} (${format.value})`);
+        const code = await sock.requestPairingCode(format.value);
+        console.log("=".repeat(50));
+        console.log("✅ SUCCESS! CODE: " + code);
+        console.log("=".repeat(50));
+        console.log("\n📱 USE THIS IN WHATSAPP DESKTOP APP:");
+        console.log("1. Open WhatsApp Desktop (NOT Web)");
+        console.log("2. Click 'Link a device'");
+        console.log("3. Click 'Link with phone number'");
+        console.log("4. Enter: +918119081491");
+        console.log("5. Enter code: " + code);
+        console.log("\n⏰ Code expires in 30 seconds!");
+        return; // Stop if successful
+    } catch (err) {
+        console.log(`❌ Failed: ${err.message}`);
+    }
+    await delay(1000); // Wait 1 second between tries
+}
+
+console.log("\n💀 ALL FORMATS FAILED!");
+console.log("Possible reasons:");
+console.log("1. WhatsApp blocking bot connections");
+console.log("2. Number needs phone call verification");
+console.log("3. Temporary WhatsApp server issue");
 }
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("connection.update", (update) => {
