@@ -6,11 +6,6 @@ const cron = require("node-cron");
 const app = express();
 const fs = require('fs');
 // FORCE LOGOUT: Delete old session to get a new code
-if (fs.existsSync('auth_info_baileys')) {
-    fs.rmSync('auth_info_baileys', { recursive: true, force: true });
-    console.log("Old session deleted. Generating new code...");
-}
-
 // --- RENDER SERVER FIX ---
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Mizo RP Bot is Active!'));
@@ -51,7 +46,7 @@ let sock;
 let pairingCodeRequested = false; 
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("mizo_final_v3");
+  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
   sock = makeWASocket({
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
@@ -61,7 +56,7 @@ async function startBot() {
 
   // --- PAIRING CODE GENERATION ---
   // We added '!pairingCodeRequested' to stop the double code spam
-  if (!sock.authState.creds.registered && !pairingCodeRequested) {
+if (!sock.authState.creds.registered && !pairingCodeRequested) {
     pairingCodeRequested = true; // Lock it immediately
     const phoneNumber = "919233137736"; 
     
