@@ -1,965 +1,375 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
-const pino = require("pino");
-const express = require("express");
-const admin = require("firebase-admin");
-const cron = require("node-cron");
-const app = express();
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
+const pino = require('pino');
 const fs = require('fs');
-function clearOldSessions() {
-    const sessionDir = './auth_info_baileys';
-    if (fs.existsSync(sessionDir)) {
-        console.log('🧹 CLEARING OLD SESSION FILES...');
-        fs.rmSync(sessionDir, { recursive: true, force: true });
-        console.log('✅ OLD SESSIONS CLEARED');
-    } else {
-        console.log('✅ NO OLD SESSIONS FOUND');
-    }
+
+// --- CONFIGURATION ---
+const ADMIN_NUMBER = "91923313773"; // Admin number (without +)
+const OWNER_NUMBER = "919233137736"; // Bot Owner/Bank Controller
+const DB_FILE = './database.json';
+
+// --- DATABASE & STATE ---
+let db = {
+    users: {},
+    bank: 0,
+    loans: [],
+    investments: []
+};
+
+// Load Database
+if (fs.existsSync(DB_FILE)) {
+    db = JSON.parse(fs.readFileSync(DB_FILE));
+} else {
+    saveDB();
 }
 
-clearOldSessions();
-// FORCE LOGOUT: Delete old session to get a new code
-// --- RENDER SERVER FIX ---
-const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Mizo RP Bot is Active!'));
-app.listen(PORT, '0.0.0.0', () => console.log(`Server listening on port ${PORT}`));
+function saveDB() {
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+}
 
-// Firebase Configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyAtbA4OsuRr5qmVSwbIo-M03uCGJ-wbxCM",
-  authDomain: "j-bo-a567a.firebaseapp.com",
-  databaseURL: "https://j-bo-a567a-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "j-bo-a567a",
-  storageBucket: "j-bo-a567a.firebasestorage.app",
-  messagingSenderId: "1029278826614",
-  appId: "1:1029278826614:web:b608af7356752ff2e9df57"
+// --- HELPER FUNCTIONS ---
+const getTimestamp = () => Date.now();
+const formatMoney = (amount) => `₹${amount.toLocaleString()}`;
+
+// Bilingual Response Helper
+const txt = (eng, mizo) => `🇬🇧 ${eng}\n🇲🇿 ${mizo}`;
+
+// ID Generator
+const generateID = (role) => {
+    if (role === 'businessman') return Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
+    return Math.floor(100 + Math.random() * 900).toString(); // 3 digits
 };
 
-// Initialize Firebase
-admin.initializeApp({
-  credential: admin.credential.applicationDefault(),
-  databaseURL: firebaseConfig.databaseURL
-});
-
-const db = admin.firestore();
-
-// Bot Configuration
-const BOT_NUMBER = '+918119081491';
-const ADMIN_NUMBER = '+919233137736';
-
-const ROLES = {
-  CITIZEN: 'citizen',
-  THIEF: 'thief',
-  POLICE: 'police',
-  BUSINESSMAN: 'businessman'
+// Get User (Create if not exists)
+const getUser = (jid, name) => {
+    if (!db.users[jid]) {
+        db.users[jid] = {
+            id: generateID('citizen'),
+            role: 'citizen',
+            cash: 10000,
+            name: name || 'Unknown',
+            lastIncome: getTimestamp(),
+            casesSolved: 0,
+            bodyguard: null, 
+            employer: null, 
+            cooldowns: {
+                roleChange: 0,
+                roleChangeCount: 0,
+                rob: 0,
+                jail: 0
+            }
+        };
+        saveDB();
+    }
+    return db.users[jid];
 };
 
-const activeUsers = new Map();
-let sock;
-let pairingCodeRequested = false; 
+// --- GAME LOGIC LOOP (Income & Investments) ---
+setInterval(() => {
+    const now = getTimestamp();
+    let updated = false;
 
+    for (let jid in db.users) {
+        const user = db.users[jid];
+
+        // 1. JAIL TIME CHECK
+        if (user.cooldowns.jail > 0 && now > user.cooldowns.jail) {
+            user.cooldowns.jail = 0;
+            user.id = generateID('thief'); // New ID after jail
+            updated = true;
+        }
+
+        // 2. PASSIVE INCOME
+        // Citizen: 400 every 30m
+        if (user.role === 'citizen' && now - user.lastIncome >= 30 * 60 * 1000) {
+            user.cash += 400;
+            user.lastIncome = now;
+            updated = true;
+        }
+        // Thief: 50 every 20m
+        if (user.role === 'thief' && user.cooldowns.jail === 0 && now - user.lastIncome >= 20 * 60 * 1000) {
+            user.cash += 50;
+            user.lastIncome = now;
+            updated = true;
+        }
+        // Police: 450 every 30m
+        if (user.role === 'police' && now - user.lastIncome >= 30 * 60 * 1000) {
+            user.cash += 450;
+            user.lastIncome = now;
+            updated = true;
+        }
+        // Businessman: 1000 every 30m
+        if (user.role === 'businessman' && now - user.lastIncome >= 30 * 60 * 1000) {
+            user.cash += 1000;
+            user.lastIncome = now;
+            updated = true;
+        }
+    }
+
+    // 3. INVESTMENTS CHECK
+    db.investments = db.investments.filter(inv => {
+        if (now >= inv.endTime) {
+            const user = db.users[inv.jid];
+            // 40% success rate
+            const isSuccess = Math.random() < 0.4; 
+            
+            if (isSuccess) {
+                const multiplier = Math.floor(Math.random() * 5) + 1; // 1X to 5X
+                const profit = inv.amount * multiplier;
+                user.cash += inv.amount + profit;
+            } else {
+                const lossPct = Math.floor(Math.random() * 100) + 1;
+                const loss = Math.floor(inv.amount * (lossPct / 100));
+                const refund = inv.amount - loss;
+                user.cash += refund;
+                db.bank += loss; // Lost money goes to Universal Bank
+            }
+            updated = true;
+            return false; // Remove from active list
+        }
+        return true;
+    });
+
+    if (updated) saveDB();
+}, 60 * 1000); // Run every minute
+
+// --- MAIN CONNECTION FUNCTION ---
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
-  sock = makeWASocket({
-    logger: pino({ level: "silent" }),
-    printQRInTerminal: false,
-    auth: state,
-    browser: ["Chrome", "Windows", "10"],
-  });
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    const { version } = await fetchLatestBaileysVersion();
+    
+    const sock = makeWASocket({
+        version,
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: false,
+        auth: state,
+        browser: ["Chrome", "Linux", ""]
+    });
 
-// --- PAIRING CODE GENERATION (DEBUG VERSION) ---
-if (!sock.authState.creds.registered && !pairingCodeRequested) {
-    pairingCodeRequested = true;
-    
-    console.log("🔍 DEBUG: Starting pairing process...");
-    console.log("🔍 Phone number to use:", BOT_NUMBER);
-    
-    setTimeout(async () => {
-        console.log("⚡ REQUESTING PAIRING CODE NOW...");
+    // PAIRING CODE LOGIC
+    if (!sock.authState.creds.me && !sock.authState.creds.registered) {
+        const question = (text) => new Promise(resolve => {
+            const readline = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+            readline.question(text, answer => {
+                readline.close();
+                resolve(answer);
+            });
+        });
+        const phoneNumber = await question('Enter your phone number (e.g., 919233137736): ');
+        const code = await sock.requestPairingCode(phoneNumber);
+        console.log(`Your Pairing Code: ${code}`);
+    }
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (shouldReconnect) startBot();
+        } else if (connection === 'open') {
+            console.log('Bot Connected!');
+        }
+    });
+
+    // --- MESSAGE HANDLER ---
+    sock.ev.on('messages.upsert', async m => {
+        const msg = m.messages[0];
+        if (!msg.message || msg.key.fromMe) return;
+
+        const from = msg.key.remoteJid;
+        const type = Object.keys(msg.message)[0];
+        const body = (type === 'conversation') ? msg.message.conversation : 
+                     (type === 'extendedTextMessage') ? msg.message.extendedTextMessage.text : '';
         
-        // Try different formats one by one
-    const testFormats = [
-    { name: "Raw number", value: "918119081491" },
-    { name: "With @s.whatsapp.net", value: "918119081491@s.whatsapp.net" },
-    { name: "Country code separate", value: "+918119081491" }, // FIXED
-    { name: "With plus", value: "+918119081491" }
-];
+        const pushName = msg.pushName;
+        const sender = msg.key.participant || from; 
+        
+        if (!body.startsWith('/') && !body.startsWith('@')) return;
 
-for (const format of testFormats) {
-    try {
-        console.log(`\n🔄 Trying: ${format.name} (${format.value})`);
-        const code = await sock.requestPairingCode(format.value);
-        console.log("=".repeat(50));
-        console.log("✅ SUCCESS! CODE: " + code);
-        console.log("=".repeat(50));
-        console.log("\n📱 USE THIS IN WHATSAPP DESKTOP APP:");
-        console.log("1. Open WhatsApp Desktop (NOT Web)");
-        console.log("2. Click 'Link a device'");
-        console.log("3. Click 'Link with phone number'");
-        console.log("4. Enter: +918119081491");
-        console.log("5. Enter code: " + code);
-        console.log("\n⏰ Code expires in 30 seconds!");
-        return; // Stop if successful
-    } catch (err) {
-        console.log(`❌ Failed: ${err.message}`);
-    }
-    await delay(1000); // Wait 1 second between tries
+        // Initialize User
+        const user = getUser(sender, pushName);
+        const args = body.trim().split(/ +/);
+        const command = args[0].toLowerCase();
+        
+        const isAdmin = sender.includes(ADMIN_NUMBER);
+
+        // 1. MENU
+        if (command === '/menu') {
+            const menu = `
+╔══ *GAME MENU* ══╗
+╠ 👮 /crlps - Become Police
+╠ 🦹 /crltf - Become Thief
+╠ 🤵 /crlbs - Become Businessman
+╠ 🔍 /status - Check your status
+╠ 💰 /ubank - Universal Bank info
+╠ 🏆 /toppolice - Top Police
+╠ 🤑 /richestman - Richest Players
+╠ 🗑️ /del - Delete commands
+╠
+╠ *Thief Only:*
+╠ 🎯 /scantarget - Find targets
+╠ 🚔 /scanps - Find Police
+╠ 🕰️ /jailtm - Check jail time
+╠ @user/rob123 - Rob user (guess ID)
+╠
+╠ *Police Only:*
+╠ 📡 /scan - Find Thieves
+╠ @user/arrest123 - Arrest (guess ID)
+╠
+╠ *Businessman Only:*
+╠ 💸 /invest1000 - Invest cash
+╠ 📜 /investst - Active investments
+╠ 🤝 @user/hire - Hire Bodyguard
+╠ 🏦 /loan1000 - Request Loan
+╚═════════════════`;
+            await sock.sendMessage(from, { text: menu });
+        }
+
+        // 2. ROLE SELECTION
+        if (['/crlps', '/crltf', '/crlbs'].includes(command)) {
+            // Check Cooldown (skip for Admin)
+            if (!isAdmin && user.cooldowns.roleChangeCount >= 2 && Date.now() < user.cooldowns.roleChange) {
+                const waitDays = Math.ceil((user.cooldowns.roleChange - Date.now()) / (1000 * 60 * 60 * 24));
+                return sock.sendMessage(from, { text: txt(`You must wait ${waitDays} days to change roles again.`, `Nihna thlak turin ni ${waitDays} i nghah a ngai.`) });
+            }
+
+            let newRole = '';
+            let msgEng = '', msgMiz = '';
+
+            if (command === '/crlps') { newRole = 'police'; msgEng = 'You are now a Police Officer!'; msgMiz = 'Police i ni ta!'; }
+            if (command === '/crltf') { newRole = 'thief'; msgEng = 'You are now a Thief!'; msgMiz = 'Rukru i ni ta!'; }
+            if (command === '/crlbs') { 
+                newRole = 'businessman'; 
+                msgEng = 'You are now a Businessman!'; 
+                msgMiz = 'Sumdawng i ni ta!';
+                if (user.role !== 'businessman') user.cash += 500000; 
+            }
+
+            user.role = newRole;
+            user.id = generateID(newRole); 
+            
+            if (!isAdmin) {
+                user.cooldowns.roleChangeCount++;
+                if (user.cooldowns.roleChangeCount >= 2) {
+                    user.cooldowns.roleChange = Date.now() + (2 * 24 * 60 * 60 * 1000);
+                }
+            }
+            saveDB();
+            await sock.sendMessage(from, { text: txt(msgEng, msgMiz) });
+        }
+
+        // 3. THIEF COMMANDS
+        if (user.role === 'thief') {
+            // Check Jail
+            if (user.cooldowns.jail > Date.now()) {
+                return sock.sendMessage(from, { text: txt("You are in jail!", "Tan in ah i tang mek!") });
+            }
+
+            if (command === '/scantarget') {
+                if (user.cash < 200) return sock.sendMessage(from, { text: txt("Not enough cash!", "Pawisa i nei tlem lutuk!") });
+                user.cash -= 200;
+                
+                let output = "🎯 *TARGETS:*\n";
+                for (let targetJid in db.users) {
+                    const t = db.users[targetJid];
+                    if (t.role === 'citizen' || t.role === 'businessman') {
+                        let idShow = "";
+                        if (t.role === 'citizen') idShow = t.id.substring(0, 2) + "?";
+                        if (t.role === 'businessman') {
+                            if (t.bodyguard) idShow = t.id.substring(0, 2) + "????";
+                            else idShow = t.id.substring(0, 3) + "???";
+                        }
+                        output += `@${t.name} | Role: ${t.role} | Wealth: ${t.cash} | ID: ${idShow}\n`;
+                    }
+                }
+                saveDB();
+                await sock.sendMessage(from, { text: output });
+            }
+
+            // --- ROBBERY LOGIC ---
+            if (command.includes('/rob')) {
+                const mentionedJid = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                const guess = parseInt(body.replace(/\D/g, '')); // Extract numbers from command
+
+                if (mentionedJid && db.users[mentionedJid]) {
+                    const target = db.users[mentionedJid];
+                    
+                    // Simple logic: if guessed ID perfectly, 10% stole
+                    // If close, 2% or 1%
+                    const realID = parseInt(target.id);
+                    const diff = Math.abs(realID - guess);
+                    let stolen = 0;
+
+                    if (diff === 0) {
+                        stolen = Math.floor(target.cash * 0.10); // 10%
+                    } else if (diff < 10) { 
+                        stolen = Math.floor(target.cash * 0.02); // 2%
+                    } else if (diff < 50) {
+                        stolen = Math.floor(target.cash * 0.01); // 1%
+                    }
+
+                    if (stolen > 0) {
+                        target.cash -= stolen;
+                        user.cash += stolen;
+                        target.id = generateID(target.role); // New ID for victim
+                        saveDB();
+                        await sock.sendMessage(from, { text: txt(`Robbery Successful! You stole ₹${stolen}`, `Rukruk a hlawhtling! ₹${stolen} i ru chhuak`) });
+                    } else {
+                         await sock.sendMessage(from, { text: txt(`Robbery Failed! ID was wrong.`, `Rukruk a hlawhchham! ID i hre sual.`) });
+                    }
+                } else {
+                    await sock.sendMessage(from, { text: txt("Tag a user to rob them! (e.g., @user/rob123)", "Mi rawk turin tag rawh! (e.g., @user/rob123)") });
+                }
+            }
+        } // <--- THIEF BLOCK CLOSES HERE
+
+        // 4. POLICE COMMANDS
+        if (user.role === 'police') {
+            if (command === '/scan') {
+                 if (user.cash < 200) return sock.sendMessage(from, { text: txt("Not enough cash!", "Pawisa i nei tlem lutuk!") });
+                 user.cash -= 200;
+                 let output = "📡 *THIEVES:*\n";
+                 for (let tJid in db.users) {
+                     const t = db.users[tJid];
+                     if (t.role === 'thief') {
+                        // Police see ID: 12?
+                        output += `@${t.name} | ID: ${t.id.substring(0, 2)}? | Reward: ${Math.floor(t.cash * 0.03)}\n`;
+                     }
+                 }
+                 saveDB();
+                 await sock.sendMessage(from, { text: output });
+            }
+        }
+
+        // 5. STATUS
+        if (command === '/status' || command.includes('/status')) {
+            let targetUser = user; 
+            let displayRole = targetUser.role;
+            if (displayRole === 'thief') displayRole = 'citizen'; // Disguise
+
+            await sock.sendMessage(from, { 
+                text: txt(
+                    `Role: ${displayRole}\nWealth: ${targetUser.cash}\nCases Solved: ${targetUser.casesSolved}`,
+                    `Nihna: ${displayRole}\nHausakna: ${targetUser.cash}\nMisual man zat: ${targetUser.casesSolved}`
+                )
+            });
+        }
+        
+        // 6. UNIVERSAL BANK
+        if (command === '/ubank') {
+             await sock.sendMessage(from, { text: `🏦 *Universal Bank*\n💰 Balance: ${formatMoney(db.bank)}` });
+        }
+
+        // 7. ADMIN COMMANDS
+        if (isAdmin) {
+            if (command === '/editstatus') {
+                user.cash = 999999999; 
+                saveDB();
+                await sock.sendMessage(from, { text: "Admin status updated." });
+            }
+        }
+
+    });
 }
 
-console.log("\n💀 ALL FORMATS FAILED!");
-console.log("Possible reasons:");
-console.log("1. WhatsApp blocking bot connections");
-console.log("2. Number needs phone call verification");
-console.log("3. Temporary WhatsApp server issue");
-}
-  sock.ev.on("creds.update", saveCreds);
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect } = update;
-    if (connection === "close") {
-      const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-      if (shouldReconnect) startBot();
-    } else if (connection === "open") {
-      console.log("✅ BOT CONNECTED!");
-      startAutoIncome();
-    }
-  });
-
-  sock.ev.on("messages.upsert", async (m) => {
-    const info = m.messages[0];
-    if (!info.message || info.key.fromMe) return;
-    await handleGameLogic(info);
-  });
-}
 startBot();
-
-
-// Helper Functions
-function isAdmin(phoneNumber) {
-  return phoneNumber === ADMIN_NUMBER;
-}
-
-function generateUniqueId(length) {
-  let id = '';
-  for (let i = 0; i < length; i++) {
-    id += Math.floor(Math.random() * 10);
-  }
-  return id;
-}
-
-async function getOrCreateUser(phoneNumber, name) {
-  if (activeUsers.has(phoneNumber)) {
-    return activeUsers.get(phoneNumber);
-  }
-  
-  const userRef = db.collection('users').doc(phoneNumber);
-  const userDoc = await userRef.get();
-  
-  if (userDoc.exists) {
-    const userData = userDoc.data();
-    activeUsers.set(phoneNumber, userData);
-    return userData;
-  }
-  
-  const newUser = {
-    phoneNumber: phoneNumber,
-    name: name,
-    role: ROLES.CITIZEN,
-    cash: 10000,
-    id: generateUniqueId(3),
-    casesSolved: 0,
-    roleChanges: 0,
-    lastRoleChange: null,
-    inJail: false,
-    jailEndTime: null,
-    robbedTargets: [],
-    bodyguard: null,
-    employer: null,
-    investments: [],
-    investmentHistory: [],
-    loan: null,
-    banned: false,
-    createdAt: Date.now()
-  };
-  
-  await userRef.set(newUser);
-  activeUsers.set(phoneNumber, newUser);
-  
-  return newUser;
-}
-
-async function updateUser(phoneNumber, updates) {
-  const userRef = db.collection('users').doc(phoneNumber);
-  await userRef.update(updates);
-  
-  if (activeUsers.has(phoneNumber)) {
-    const user = activeUsers.get(phoneNumber);
-    Object.assign(user, updates);
-  }
-}
-
-async function getUniversalBank() {
-  const bankRef = db.collection('system').doc('bank');
-  const bankDoc = await bankRef.get();
-  
-  if (!bankDoc.exists) {
-    await bankRef.set({ balance: 0 });
-    return 0;
-  }
-  
-  return bankDoc.data().balance || 0;
-}
-
-async function addToBank(amount) {
-  const bankRef = db.collection('system').doc('bank');
-  const currentBalance = await getUniversalBank();
-  await bankRef.set({ balance: currentBalance + amount });
-}
-
-function formatCash(amount) {
-  return amount.toLocaleString();
-}
-
-function formatTime(ms) {
-  const minutes = Math.floor(ms / 60000);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  
-  if (days > 0) return days + ' day' + (days > 1 ? 's' : '');
-  if (hours > 0) return hours + ' hour' + (hours > 1 ? 's' : '');
-  return minutes + ' minute' + (minutes !== 1 ? 's' : '');
-}
-
-function maskId(id, role, hasBodyguard) {
-  if (role === ROLES.CITIZEN || role === ROLES.THIEF) {
-    return id.substring(0, 2) + '?';
-  }
-  
-  if (role === ROLES.BUSINESSMAN) {
-    if (hasBodyguard) {
-      return id.substring(0, 2) + '????';
-    } else {
-      return id.substring(0, 3) + '???';
-    }
-  }
-  
-  return id;
-}
-
-function checkIdMatch(guessedId, actualId) {
-  if (guessedId === actualId) return 'exact';
-  
-  const actualNum = parseInt(actualId);
-  const guessedNum = parseInt(guessedId);
-  const diff = Math.abs(guessedNum - actualNum);
-  
-  if (guessedNum > actualNum && diff <= 100) return 'close';
-  if (diff <= 200) return 'somewhat';
-  
-  return 'wrong';
-}
-
-function startAutoIncome() {
-  cron.schedule('* * * * *', async () => {
-    try {
-      const usersSnapshot = await db.collection('users').get();
-      const now = Date.now();
-      
-      for (const doc of usersSnapshot.docs) {
-        const user = doc.data();
-        const phoneNumber = doc.id;
-        
-        if (user.banned) continue;
-        if (user.inJail && user.jailEndTime > now) continue;
-        
-        if (user.role === ROLES.CITIZEN) {
-          if (!user.lastCitizenIncome || now - user.lastCitizenIncome >= 1800000) {
-            await updateUser(phoneNumber, {
-              cash: user.cash + 400,
-              lastCitizenIncome: now
-            });
-          }
-        }
-        
-        if (user.role === ROLES.POLICE) {
-          if (!user.lastPoliceIncome || now - user.lastPoliceIncome >= 1800000) {
-            await updateUser(phoneNumber, {
-              cash: user.cash + 450,
-              lastPoliceIncome: now
-            });
-          }
-        }
-        
-        if (user.role === ROLES.THIEF) {
-          if (!user.lastThiefIncome || now - user.lastThiefIncome >= 1200000) {
-            await updateUser(phoneNumber, {
-              cash: user.cash + 50,
-              lastThiefIncome: now
-            });
-          }
-        }
-        
-        if (user.role === ROLES.BUSINESSMAN) {
-          if (!user.lastBusinessmanIncome || now - user.lastBusinessmanIncome >= 1800000) {
-            await updateUser(phoneNumber, {
-              cash: user.cash + 1000,
-              lastBusinessmanIncome: now
-            });
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Auto income error:', error);
-    }
-  });
-}
-
-// Message Handler
-async function handleGameLogic(info) {
-    // Adapter to make Baileys look like the old library
-    const from = info.key.remoteJid;
-    const bodyText = (info.message.conversation || info.message.extendedTextMessage?.text || "").trim();
-    const senderNum = from.split('@')[0];
-    const senderName = info.pushName || senderNum;
-    
-    // Create 'msg' object
-    const msg = {
-        body: bodyText,
-        reply: async (text) => await sock.sendMessage(from, { text: text }, { quoted: info }),
-        getChat: async () => ({
-            isGroup: from.endsWith('@g.us'),
-            participants: from.endsWith('@g.us') ? (await sock.groupMetadata(from)).participants.map(p => ({ id: { user: p.id.split('@')[0] } })) : []
-        }),
-        getContact: async () => ({ number: senderNum, pushname: senderName, name: senderName })
-    };
-  try {
-    const chat = await msg.getChat();
-    const contact = await msg.getContact();
-    const phoneNumber = contact.number;
-    const name = contact.pushname || contact.name || phoneNumber;
-    const messageText = msg.body.trim();
-    
-    const user = await getOrCreateUser(phoneNumber, name);
-    
-    if (user.banned && !isAdmin(phoneNumber)) {
-      await msg.reply('You are permanently banned from this game.');
-      return;
-    }
-    
-    if (user.inJail && user.jailEndTime) {
-      if (Date.now() < user.jailEndTime) {
-        if (messageText === '/jailtm') {
-          const timeLeft = user.jailEndTime - Date.now();
-          await msg.reply('JAIL STATUS\nLocation: Mizoram Central Jail\nTime Remaining: ' + formatTime(timeLeft) + '\n\nYou cannot rob or be arrested during this time.');
-          return;
-        }
-        return;
-      } else {
-        await updateUser(phoneNumber, {
-          inJail: false,
-          jailEndTime: null,
-          id: generateUniqueId(3)
-        });
-        user.inJail = false;
-        user.jailEndTime = null;
-      }
-    }
-    if (messageText === '/menu') {
-      let menu = 'GAME MENU\n\n';
-      menu += 'CITIZEN COMMANDS:\n';
-      menu += '/crlps - Change to Police\n';
-      menu += '/crltf - Change to Thief\n';
-      menu += '/crlbs - Change to Businessman\n\n';
-      menu += 'THIEF COMMANDS:\n';
-      menu += '/scantarget - Scan targets (200 cash)\n';
-      menu += '/scanps - Scan police (100 cash)\n';
-      menu += '@user/rob[ID] - Rob target (100 cash)\n';
-      menu += '/jailtm - Check jail time\n\n';
-      menu += 'POLICE COMMANDS:\n';
-      menu += '/scan - Scan thieves (200 cash)\n';
-      menu += '@user/arrest[ID] - Arrest thief (50 cash)\n';
-      menu += '/leave - Resign from bodyguard\n\n';
-      menu += 'BUSINESSMAN COMMANDS:\n';
-      menu += '/invest[amount] - Invest money\n\n';
-      menu += 'GENERAL COMMANDS:\n';
-      menu += '/menu - Show this menu\n';
-      menu += '/status - Check your status\n';
-      menu += '/ubank - Universal Bank balance\n';
-      menu += '/toppolice - Top 50 police\n';
-      menu += '/richestman - Top 50 richest';
-      
-      await msg.reply(menu);
-      return;
-    }
-    
-    if (messageText === '/status') {
-      let statusMsg = 'YOUR STATUS\n\n';
-      let displayRole = user.role;
-      if (user.role === ROLES.THIEF && chat.isGroup) {
-        displayRole = ROLES.CITIZEN;
-      }
-      
-      statusMsg += 'Role: ' + displayRole + '\n';
-      statusMsg += 'Wealth: ' + formatCash(user.cash) + ' cash';
-      
-      if (user.role === ROLES.POLICE) {
-        statusMsg += '\nCases Solved: ' + user.casesSolved;
-      }
-      
-      await msg.reply(statusMsg);
-      return;
-    }
-    
-    if (messageText === '/ubank') {
-      const bankBalance = await getUniversalBank();
-      await msg.reply('UNIVERSAL BANK\n\nTotal Balance: ' + formatCash(bankBalance) + ' cash');
-      return;
-    }
-    
-    if (messageText === '/crlps') {
-      if (user.role === ROLES.POLICE) {
-        await msg.reply('You are already a police!');
-        return;
-      }
-      
-      if (user.roleChanges >= 2 && !isAdmin(phoneNumber)) {
-        const cooldownEnd = user.lastRoleChange + (2 * 24 * 60 * 60 * 1000);
-        if (Date.now() < cooldownEnd) {
-          const timeLeft = cooldownEnd - Date.now();
-          await msg.reply('You have reached the maximum role changes (2). Please wait ' + formatTime(timeLeft) + ' before changing again.');
-          return;
-        } else {
-          await updateUser(phoneNumber, { roleChanges: 0 });
-          user.roleChanges = 0;
-        }
-      }
-      
-      await updateUser(phoneNumber, {
-        role: ROLES.POLICE,
-        roleChanges: user.roleChanges + 1,
-        lastRoleChange: Date.now()
-      });
-      
-      await msg.reply('Your role has been changed to police!');
-      return;
-    }
-    
-    if (messageText === '/crltf') {
-      if (user.role === ROLES.THIEF) {
-        await msg.reply('You are already a thief!');
-        return;
-      }
-      
-      if (user.roleChanges >= 2 && !isAdmin(phoneNumber)) {
-        const cooldownEnd = user.lastRoleChange + (2 * 24 * 60 * 60 * 1000);
-        if (Date.now() < cooldownEnd) {
-          const timeLeft = cooldownEnd - Date.now();
-          await msg.reply('You have reached the maximum role changes (2). Please wait ' + formatTime(timeLeft) + ' before changing again.');
-          return;
-        } else {
-          await updateUser(phoneNumber, { roleChanges: 0 });
-          user.roleChanges = 0;
-        }
-      }
-      
-      await updateUser(phoneNumber, {
-        role: ROLES.THIEF,
-        id: generateUniqueId(3),
-        roleChanges: user.roleChanges + 1,
-        lastRoleChange: Date.now()
-      });
-      
-      await msg.reply('Your role has been changed to thief!');
-      return;
-    }
-    
-    if (messageText === '/crlbs') {
-      if (user.role === ROLES.BUSINESSMAN) {
-        await msg.reply('You are already a businessman!');
-        return;
-      }
-      
-      if (user.roleChanges >= 2 && !isAdmin(phoneNumber)) {
-        const cooldownEnd = user.lastRoleChange + (2 * 24 * 60 * 60 * 1000);
-        if (Date.now() < cooldownEnd) {
-          const timeLeft = cooldownEnd - Date.now();
-          await msg.reply('You have reached the maximum role changes (2). Please wait ' + formatTime(timeLeft) + ' before changing again.');
-          return;
-        } else {
-          await updateUser(phoneNumber, { roleChanges: 0 });
-          user.roleChanges = 0;
-        }
-      }
-      
-      let newCash = user.cash;
-      if (!user.wasBusinessmanBefore) {
-        newCash += 500000;
-      }
-      
-      await updateUser(phoneNumber, {
-        role: ROLES.BUSINESSMAN,
-        cash: newCash,
-        id: generateUniqueId(6),
-        wasBusinessmanBefore: true,
-        roleChanges: user.roleChanges + 1,
-        lastRoleChange: Date.now()
-      });
-      
-      await msg.reply('Your role has been changed to businessman!' + (!user.wasBusinessmanBefore ? '\nYou received 500,000 cash!' : ''));
-      return;
-    }
-    
-    if (messageText === '/scantarget') {
-      if (user.role !== ROLES.THIEF) {
-        await msg.reply('This command is only for thieves.');
-        return;
-      }
-      
-      if (!chat.isGroup) {
-        await msg.reply('This command can only be used in groups.');
-        return;
-      }
-      
-      const cost = isAdmin(phoneNumber) ? 0 : 200;
-      if (user.cash < cost) {
-        await msg.reply('You dont have enough cash. Required: ' + cost + ' cash.');
-        return;
-      }
-      
-      if (cost > 0) {
-        await updateUser(phoneNumber, { cash: user.cash - cost });
-        await addToBank(cost);
-      }
-      
-      const participants = chat.participants;
-      let results = 'TARGET SCAN RESULTS\n\n';
-      let foundAny = false;
-      
-      for (const participant of participants) {
-        const targetNumber = participant.id.user;
-        if (targetNumber === phoneNumber) continue;
-        
-        const targetDoc = await db.collection('users').doc(targetNumber).get();
-        if (!targetDoc.exists) continue;
-        
-        const target = targetDoc.data();
-        
-        if (target.role === ROLES.CITIZEN) {
-          foundAny = true;
-          const maskedId = maskId(target.id, ROLES.CITIZEN);
-          results += '@' + targetNumber + '\n';
-          results += 'Role: Citizen\n';
-          results += 'Wealth: ' + formatCash(target.cash) + ' cash\n';
-          results += 'ID: ' + maskedId + '\n\n';
-        }
-        
-        if (target.role === ROLES.BUSINESSMAN) {
-          foundAny = true;
-          const hasBodyguard = target.bodyguard ? true : false;
-          const maskedId = maskId(target.id, ROLES.BUSINESSMAN, hasBodyguard);
-          results += '@' + targetNumber + '\n';
-          results += 'Role: Businessman\n';
-          results += 'Wealth: ' + formatCash(target.cash) + ' cash\n';
-          results += 'ID: ' + maskedId + '\n\n';
-        }
-      }
-      
-      if (!foundAny) {
-        results = 'No targets found in this group.';
-      }
-      
-      if (cost > 0) {
-        results += '\n' + cost + ' cash deducted for scanning.';
-      }
-      
-      await msg.reply(results);
-      return;
-    }
-    
-    if (messageText === '/scanps') {
-      if (user.role !== ROLES.THIEF) {
-        await msg.reply('This command is only for thieves.');
-        return;
-      }
-      
-      if (!chat.isGroup) {
-        await msg.reply('This command can only be used in groups.');
-        return;
-      }
-      
-      const cost = isAdmin(phoneNumber) ? 0 : 100;
-      if (user.cash < cost) {
-        await msg.reply('You dont have enough cash. Required: ' + cost + ' cash.');
-        return;
-      }
-      
-      if (cost > 0) {
-        await updateUser(phoneNumber, { cash: user.cash - cost });
-        await addToBank(cost);
-      }
-      
-      const participants = chat.participants;
-      let results = 'POLICE SCAN RESULTS\n\n';
-      let foundAny = false;
-      
-      for (const participant of participants) {
-        const targetNumber = participant.id.user;
-        const targetDoc = await db.collection('users').doc(targetNumber).get();
-        if (!targetDoc.exists) continue;
-        
-        const target = targetDoc.data();
-        
-        if (target.role === ROLES.POLICE) {
-          foundAny = true;
-          results += '@' + targetNumber + '\n';
-          results += 'Role: Police\n';
-          results += 'Cases Solved: ' + target.casesSolved + '\n\n';
-        }
-      }
-      
-      if (!foundAny) {
-        results = 'No police found in this group.';
-      }
-      
-      if (cost > 0) {
-        results += '\n' + cost + ' cash deducted for scanning.';
-      }
-      
-      await msg.reply(results);
-      return;
-    }
-    
-    if (messageText.includes('/rob')) {
-      if (user.role !== ROLES.THIEF) {
-        await msg.reply('This command is only for thieves.');
-        return;
-      }
-      
-      const cost = isAdmin(phoneNumber) ? 0 : 100;
-      if (user.cash < cost) {
-        await msg.reply('You dont have enough cash. Required: ' + cost + ' cash.');
-        return;
-      }
-      
-      const match = messageText.match(/@(\d+)\/rob(\d+)/);
-      if (!match) {
-        await msg.reply('Invalid format. Use: @user/rob[ID]');
-        return;
-      }
-      const targetNumber = match[1];
-      const guessedId = match[2];
-      
-      if (targetNumber === phoneNumber) {
-        await msg.reply('You cannot rob yourself!');
-        return;
-      }
-      
-      const robbedData = user.robbedTargets || [];
-      const existingRob = robbedData.find(r => r.target === targetNumber);
-      
-      if (existingRob) {
-        if (existingRob.success) {
-          await msg.reply('You cannot rob the same person twice after a successful robbery.');
-          return;
-        }
-        if (Date.now() - existingRob.time < 1800000) {
-          const timeLeft = 1800000 - (Date.now() - existingRob.time);
-          await msg.reply('You must wait ' + formatTime(timeLeft) + ' before robbing this person again.');
-          return;
-        }
-      }
-      
-      const targetDoc = await db.collection('users').doc(targetNumber).get();
-      if (!targetDoc.exists) {
-        await msg.reply('Target not found.');
-        return;
-      }
-      
-      const target = targetDoc.data();
-      
-      if (target.role !== ROLES.CITIZEN && target.role !== ROLES.BUSINESSMAN) {
-        await msg.reply('You can only rob citizens and businessmen.');
-        return;
-      }
-      
-      if (cost > 0) {
-        await updateUser(phoneNumber, { cash: user.cash - cost });
-        await addToBank(cost);
-      }
-      
-      const matchType = checkIdMatch(guessedId, target.id);
-      
-      let reward = 0;
-      let success = false;
-      
-      if (matchType === 'exact') {
-        reward = Math.floor(target.cash * 0.10);
-        success = true;
-        await msg.reply('ROBBERY SUCCESS!\n\nPerfect ID match! You got 10%\nYou robbed @' + targetNumber + ' and got ' + formatCash(reward) + ' cash!');
-      } else if (matchType === 'close') {
-        reward = Math.floor(target.cash * 0.02);
-        success = true;
-        await msg.reply('ROBBERY SUCCESS!\n\nClose ID match! You got 2%\nYou robbed @' + targetNumber + ' and got ' + formatCash(reward) + ' cash!');
-      } else if (matchType === 'somewhat') {
-        reward = Math.floor(target.cash * 0.01);
-        success = true;
-        await msg.reply('ROBBERY SUCCESS!\n\nSomewhat close! You got 1%\nYou robbed @' + targetNumber + ' and got ' + formatCash(reward) + ' cash!');
-      } else {
-        await msg.reply('Robbery failed! ID guess was incorrect.');
-      }
-      
-      if (success && reward > 0) {
-        await updateUser(phoneNumber, { cash: user.cash - cost + reward });
-        await updateUser(targetNumber, { cash: target.cash - reward });
-        
-        if (target.role === ROLES.BUSINESSMAN) {
-          await updateUser(targetNumber, { id: generateUniqueId(6) });
-        }
-      }
-      
-      const updatedRobbedTargets = robbedData.filter(r => r.target !== targetNumber);
-      updatedRobbedTargets.push({
-        target: targetNumber,
-        time: Date.now(),
-        success: success
-      });
-      
-      await updateUser(phoneNumber, { robbedTargets: updatedRobbedTargets });
-      return;
-    }
-    
-    if (messageText === '/scan') {
-      if (user.role !== ROLES.POLICE) {
-        await msg.reply('This command is only for police.');
-        return;
-      }
-      
-      if (!chat.isGroup) {
-        await msg.reply('This command can only be used in groups.');
-        return;
-      }
-      
-      const cost = isAdmin(phoneNumber) ? 0 : 200;
-      if (user.cash < cost) {
-        await msg.reply('You dont have enough cash. Required: ' + cost + ' cash.');
-        return;
-      }
-      
-      if (cost > 0) {
-        await updateUser(phoneNumber, { cash: user.cash - cost });
-        await addToBank(cost);
-      }
-      
-      const participants = chat.participants;
-      let results = 'THIEF SCAN RESULTS\n\n';
-      let foundAny = false;
-      
-      for (const participant of participants) {
-        const targetNumber = participant.id.user;
-        const targetDoc = await db.collection('users').doc(targetNumber).get();
-        if (!targetDoc.exists) continue;
-        
-        const target = targetDoc.data();
-        
-        if (target.role === ROLES.THIEF) {
-          foundAny = true;
-          const reward = Math.floor(target.cash * 0.03);
-          const maskedId = maskId(target.id, ROLES.THIEF, false);
-          results += '@' + targetNumber + '\n';
-          results += 'Role: Thief\n';
-          results += 'Reward: ' + formatCash(reward) + ' cash\n';
-          results += 'ID: ' + maskedId + '\n\n';
-        }
-      }
-      
-      if (!foundAny) {
-        results = 'No thieves found in this group.';
-      }
-      
-      if (cost > 0) {
-        results += '\n' + cost + ' cash deducted for scanning.';
-      }
-      
-      await msg.reply(results);
-      return;
-    }
-    
-    if (messageText.includes('/arrest')) {
-      if (user.role !== ROLES.POLICE) {
-        await msg.reply('This command is only for police.');
-        return;
-      }
-      
-      const cost = isAdmin(phoneNumber) ? 0 : 50;
-      if (user.cash < cost) {
-        await msg.reply('You dont have enough cash. Required: ' + cost + ' cash.');
-        return;
-      }
-      
-      const match = messageText.match(/@(\d+)\/arrest(\d+)/);
-      if (!match) {
-        await msg.reply('Invalid format. Use: @user/arrest[ID]');
-        return;
-      }
-      
-      const targetNumber = match[1];
-      const guessedId = match[2];
-      
-      if (targetNumber === phoneNumber) {
-        await msg.reply('You cannot arrest yourself!');
-        return;
-      }
-      
-      const targetDoc = await db.collection('users').doc(targetNumber).get();
-      if (!targetDoc.exists) {
-        await msg.reply('Target not found.');
-        return;
-      }
-      
-      const target = targetDoc.data();
-      
-      if (target.role !== ROLES.THIEF) {
-        await msg.reply('This person is not a thief.');
-        return;
-      }
-      
-      if (cost > 0) {
-        await updateUser(phoneNumber, { cash: user.cash - cost });
-        await addToBank(cost);
-      }
-      
-      if (guessedId === target.id) {
-        const thiefLoss = Math.floor(target.cash * 0.80);
-        const policeReward = Math.floor(target.cash * 0.03);
-        const bankAmount = Math.floor(target.cash * 0.77);
-        
-        await updateUser(phoneNumber, {
-          cash: user.cash - cost + policeReward,
-          casesSolved: user.casesSolved + 1
-        });
-        
-        await updateUser(targetNumber, {
-          cash: target.cash - thiefLoss,
-          inJail: true,
-          jailEndTime: Date.now() + 300000,
-          id: generateUniqueId(3)
-        });
-        
-        await addToBank(bankAmount);
-        
-        await msg.reply('ARREST SUCCESSFUL!\n\nYou arrested @' + targetNumber + '!\nReward: ' + formatCash(policeReward) + ' cash\nCase Solved +1');
-        await msg.reply('@' + targetNumber + ' has been sent to Mizoram Central Jail for 5 minutes.');
-        
-      } else {
-        await msg.reply('Arrest failed! ID guess was incorrect.');
-      }
-      
-      return;
-    }
-    
-    if (messageText.startsWith('/invest')) {
-      if (user.role !== ROLES.BUSINESSMAN) {
-        await msg.reply('This command is only for businessmen.');
-        return;
-      }
-      
-      const amount = parseInt(messageText.replace('/invest', ''));
-      
-      if (isNaN(amount) || amount <= 0) {
-        await msg.reply('Invalid investment amount.');
-        return;
-      }
-      
-      if (user.cash < amount) {
-        await msg.reply('You dont have enough cash.');
-        return;
-      }
-      
-      await updateUser(phoneNumber, { cash: user.cash - amount });
-      
-      if (isAdmin(phoneNumber)) {
-        const rand = Math.random();
-        
-        if (rand < 0.4) {
-          const multiplier = Math.floor(Math.random() * 5) + 1;
-          const profit = amount * multiplier;
-          await updateUser(phoneNumber, { cash: user.cash - amount + amount + profit });
-          await msg.reply('Admin privilege: Investment result is instant!\n\nINVESTMENT SUCCESS!\nInvested: ' + formatCash(amount) + ' cash\nProfit: ' + formatCash(profit) + ' cash (' + multiplier + 'X)\nTotal Return: ' + formatCash(amount + profit) + ' cash');
-        } else {
-          const lossPercent = Math.floor(Math.random() * 100) + 1;
-          const loss = Math.floor(amount * (lossPercent / 100));
-          await addToBank(loss);
-          await updateUser(phoneNumber, { cash: user.cash - amount + (amount - loss) });
-          await msg.reply('Admin privilege: Investment result is instant!\n\nINVESTMENT FAILED\nInvested: ' + formatCash(amount) + ' cash\nLoss: ' + formatCash(loss) + ' cash (' + lossPercent + '%)\nRemaining: ' + formatCash(amount - loss) + ' cash');
-        }
-      } else {
-        await msg.reply('INVESTMENT STARTED\n\nAmount: ' + formatCash(amount) + ' cash\nDuration: 30 minutes\n\nWait for results...');
-        
-        setTimeout(async () => {
-          const currentUser = await getOrCreateUser(phoneNumber, name);
-          const rand = Math.random();
-          
-          if (rand < 0.4) {
-            const multiplier = Math.floor(Math.random() * 5) + 1;
-            const profit = amount * multiplier;
-            await updateUser(phoneNumber, { cash: currentUser.cash + amount + profit });
-            
-            await client.sendMessage(phoneNumber + '@c.us', 'INVESTMENT SUCCESS!\n\nInvested: ' + formatCash(amount) + ' cash\nProfit: ' + formatCash(profit) + ' cash (' + multiplier + 'X)\nTotal Return: ' + formatCash(amount + profit) + ' cash');
-          } else {
-            const lossPercent = Math.floor(Math.random() * 100) + 1;
-            const loss = Math.floor(amount * (lossPercent / 100));
-            await addToBank(loss);
-            await updateUser(phoneNumber, { cash: currentUser.cash + (amount - loss) });
-            
-            await client.sendMessage(phoneNumber + '@c.us', 'INVESTMENT FAILED\n\nInvested: ' + formatCash(amount) + ' cash\nLoss: ' + formatCash(loss) + ' cash (' + lossPercent + '%)\nRemaining: ' + formatCash(amount - loss) + ' cash');
-          }
-        }, 1800000);
-      }
-      
-      return;
-    }
-    
-    if (messageText === '/toppolice') {
-      const snapshot = await db.collection('users').where('role', '==', ROLES.POLICE).orderBy('casesSolved', 'desc').limit(50).get();
-      
-      let results = 'TOP 50 POLICE\n\n';
-      
-      if (snapshot.empty) {
-        results = 'No police found.';
-      } else {
-        let rank = 1;
-        snapshot.forEach(doc => {
-          const u = doc.data();
-          results += rank + '. @' + doc.id + ' - Cases Solved: ' + u.casesSolved + '\n';
-          rank++;
-        });
-      }
-      
-      await msg.reply(results);
-      return;
-    }
-    
-    if (messageText === '/richestman') {
-      const snapshot = await db.collection('users').orderBy('cash', 'desc').limit(50).get();
-      
-      let results = 'TOP 50 RICHEST\n\n';
-      
-      if (snapshot.empty) {
-        results = 'No players found.';
-      } else {
-        let rank = 1;
-        snapshot.forEach(doc => {
-          const u = doc.data();
-          let displayRole = u.role === ROLES.THIEF ? ROLES.CITIZEN : u.role;
-          results += rank + '. @' + doc.id + ' - ' + displayRole + ' - ' + formatCash(u.cash) + ' cash\n';
-          rank++;
-        });
-      }
-      
-      await msg.reply(results);
-      return;
-    }
-    
-  } catch (error) {
-    console.error('Error:', error);
-    await msg.reply('An error occurred. Please try again.');
-  }
-}

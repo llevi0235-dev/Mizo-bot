@@ -1,17 +1,22 @@
 {
-  "name": "mizo-rp-bot",
+  "name": "whatsapp-bot-game",
   "version": "1.0.0",
-  "description": "Mizo Roleplay WhatsApp Bot",
+  "description": "A WhatsApp Bot Game with Citizens, Police, and Thieves",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "baileys",
+    "game"
+  ],
+  "author": "Your Name",
+  "license": "ISC",
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",
-    "firebase": "^11.0.2",
-    "firebase-admin": "^12.0.0",
     "pino": "^9.5.0",
-    "express": "^4.21.0",
-    "node-cron": "^3.0.3"
+    "qrcode-terminal": "^0.12.0"
   }
 }

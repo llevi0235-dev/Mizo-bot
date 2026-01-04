@@ -1,4 +1,12 @@
-auth_info_baileys/
+# Dependencies
 node_modules/
-.env
-*.log
+
+# WhatsApp Session (CRITICAL: Do not remove this line)
+auth_info_baileys/
+
+# Game Database (To prevent overwriting player data)
+database.json
+
+# Logs and system files
+npm-debug.log
+.DS_Store
