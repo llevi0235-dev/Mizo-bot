@@ -65,17 +65,19 @@ async function startBot() {
     pairingCodeRequested = true; // Lock it immediately
     const phoneNumber = "919233137736"; 
     
+        // --- FORCE PAIRING CODE (NO CHECKS) ---
     setTimeout(async () => {
+      console.log("⚡ FORCE START: Requesting Pairing Code...");
       try {
+        const phoneNumber = "919233137736"; // Defined here to be safe
         const code = await sock.requestPairingCode(phoneNumber);
-        console.log("\n============================================");
-        console.log("🚨 PAIRING CODE: " + code);
-        console.log("============================================\n");
+        console.log("\n👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇");
+        console.log("🚨 CODE: " + code);
+        console.log("👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆\n");
       } catch (err) { 
-          console.log("Pairing error: " + err);
-          pairingCodeRequested = false; // Unlock if it failed
+          console.log("❌ ERROR GETTING CODE: " + err); 
       }
-    }, 10000); // Increased to 10 seconds to be safe
+    }, 3000); // 3 Seconds
   }
 
   sock.ev.on("creds.update", saveCreds);
