@@ -113,7 +113,6 @@ if (!sock.authState.creds.registered && !pairingCodeRequested) {
         
     }, 3000);
 }
-}
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect } = update;
