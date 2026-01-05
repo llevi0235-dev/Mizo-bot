@@ -1,4 +1,4 @@
-// --- FIX FOR RENDER DEPLOYMENT (KEEPS BOT ALIVE) ---
+// --- RENDER KEEP ALIVE (Fake Server) ---
 const http = require('http');
 const port = process.env.PORT || 8000;
 const server = http.createServer((req, res) => {
@@ -8,18 +8,25 @@ const server = http.createServer((req, res) => {
 server.listen(port, () => {
     console.log(`✅ Server is listening on port ${port} (Render compatible)`);
 });
-// ---------------------------------------------------
+// ---------------------------------------
 
 console.log("▶️ SYSTEM STARTING... PLEASE WAIT...");
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
+const { 
+    default: makeWASocket, 
+    useMultiFileAuthState, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    makeCacheableSignalKeyStore, // <--- THE SECRET INGREDIENT FROM OLD CODE
+    delay 
+} = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
 
 // --- CONFIGURATION ---
-const ADMIN_NUMBER = "919233137736"; // Admin (No +)
-const OWNER_NUMBER = "919233137736"; // Bot Owner & Bank
-const MY_NUMBER = "919233137736";   // YOUR BOT NUMBER (Hardcoded to fix freezing)
+const ADMIN_NUMBER = "919233137736"; 
+const OWNER_NUMBER = "919233137736"; 
+const MY_NUMBER = "919233137736";   
 const DB_FILE = './database.json';
 
 // --- DATABASE & STATE ---
@@ -52,8 +59,8 @@ const formatMoney = (amount) => `₹${amount.toLocaleString()}`;
 const txt = (eng, mizo) => `🇬🇧 ${eng}\n🇲🇿 ${mizo}`;
 
 const generateID = (role) => {
-    if (role === 'businessman') return Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
-    return Math.floor(100 + Math.random() * 900).toString(); // 3 digits
+    if (role === 'businessman') return Math.floor(100000 + Math.random() * 900000).toString(); 
+    return Math.floor(100 + Math.random() * 900).toString(); 
 };
 
 const getUser = (jid, name) => {
@@ -65,19 +72,13 @@ const getUser = (jid, name) => {
             name: name || 'Unknown',
             lastIncome: getTimestamp(),
             casesSolved: 0,
-            bodyguard: null, // JID of police
-            employer: null,  // JID of businessman
-            robbedBy: [],    // List of thieves who robbed this user
-            cooldowns: { 
-                roleChange: 0, 
-                roleChangeCount: 0, 
-                rob: 0, 
-                jail: 0 
-            }
+            bodyguard: null, 
+            employer: null, 
+            robbedBy: [],    
+            cooldowns: { roleChange: 0, roleChangeCount: 0, rob: 0, jail: 0 }
         };
         saveDB();
     }
-    // Update name if changed
     if (name) db.users[jid].name = name;
     return db.users[jid];
 };
@@ -88,7 +89,6 @@ setInterval(() => {
     let updated = false;
 
     // 1. INVESTMENTS
-    // Filter active investments
     const activeInvestments = db.investments.filter(inv => now < inv.endTime);
     const finishedInvestments = db.investments.filter(inv => now >= inv.endTime);
 
@@ -96,27 +96,21 @@ setInterval(() => {
         const user = db.users[inv.jid];
         if (!user) return;
 
-        // 40% Success Rate
-        const isSuccess = Math.random() < 0.4; 
-        
+        const isSuccess = Math.random() < 0.4; // 40% Success
         if (isSuccess) {
-            const multiplier = Math.floor(Math.random() * 5) + 1; // 1X to 5X
+            const multiplier = Math.floor(Math.random() * 5) + 1; 
             const profit = inv.amount * multiplier;
-            const totalReturn = inv.amount + profit;
-            user.cash += totalReturn;
+            user.cash += inv.amount + profit;
         } else {
-            // 60% Fail Rate
-            const lossPct = Math.floor(Math.random() * 100) + 1; // 1% to 100%
+            const lossPct = Math.floor(Math.random() * 100) + 1; 
             const loss = Math.floor(inv.amount * (lossPct / 100));
             const refund = inv.amount - loss;
-            
             user.cash += refund;
-            db.bank += loss; // Lost money goes to Universal Bank
+            db.bank += loss; 
         }
         updated = true;
     });
     
-    // Keep only active investments
     if (finishedInvestments.length > 0) {
         db.investments = activeInvestments;
         updated = true;
@@ -126,20 +120,18 @@ setInterval(() => {
     for (let jid in db.users) {
         const user = db.users[jid];
         
-        // JAIL CHECK
         if (user.cooldowns.jail > 0 && now > user.cooldowns.jail) {
             user.cooldowns.jail = 0;
-            user.id = generateID('thief'); // New ID after jail
+            user.id = generateID('thief'); 
             updated = true;
         }
 
-        // INCOME CHECK
         const limits = { citizen: 30, thief: 20, police: 30, businessman: 30 };
         const amounts = { citizen: 400, thief: 50, police: 450, businessman: 1000 };
         const minutes = limits[user.role] || 30;
         
         if (now - user.lastIncome >= minutes * 60 * 1000) {
-            if (user.role === 'thief' && user.cooldowns.jail > 0) continue; // No income in jail
+            if (user.role === 'thief' && user.cooldowns.jail > 0) continue; 
             user.cash += amounts[user.role] || 0;
             user.lastIncome = now;
             updated = true;
@@ -148,21 +140,31 @@ setInterval(() => {
 
     if (updated) saveDB();
 }, 60 * 1000);
+
 // --- MAIN BOT CONNECTION ---
 async function startBot() {
     console.log("▶️ Loading Authentication...");
-    const { state, saveCreds } = await useMultiFileAuthState('session_new_v2');
+    // USING STANDARD AUTH FOLDER (Like Old Code)
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
     
+    // --- THIS IS THE FIX: CONNECTION CONFIG FROM OLD CODE ---
     const sock = makeWASocket({
+        auth: { 
+            creds: state.creds, 
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })) 
+        },
         version,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        auth: state,
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        markOnlineOnConnect: true,
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 10000,
+        getMessage: async (key) => { return undefined; } // Fix for "Hello" crash
     });
+    // -------------------------------------------------------
 
-    // --- PAIRING CODE LOGIC (HARDCODED) ---
+    // --- PAIRING CODE LOGIC ---
     if (!sock.authState.creds.me && !sock.authState.creds.registered) {
         console.log(`\n⚠️ WAITING 3 SECONDS TO REQUEST CODE FOR: ${MY_NUMBER}...\n`);
         
@@ -175,7 +177,7 @@ async function startBot() {
             } catch (err) {
                 console.log("❌ Error requesting code. Check internet or number.", err);
             }
-        }, 3000);
+        }, 5000); // Increased wait time slightly (like old code)
     }
 
     sock.ev.on('creds.update', saveCreds);
@@ -223,7 +225,6 @@ async function startBot() {
 
         // 2. ROLE SELECTION
         if (['/crlps', '/crltf', '/crlbs'].includes(command)) {
-            // Cooldown Check (Skip for Admin)
             if (!isAdmin && user.cooldowns.roleChangeCount >= 2 && Date.now() < user.cooldowns.roleChange) {
                 const waitDays = Math.ceil((user.cooldowns.roleChange - Date.now()) / (1000 * 60 * 60 * 24));
                 return sock.sendMessage(from, { text: txt(`Wait ${waitDays} days to change role.`, `Nihna thlak turin ni ${waitDays} i nghah a ngai.`) });
@@ -238,7 +239,7 @@ async function startBot() {
                 newRole = 'businessman'; 
                 msgEng = 'You are now a Businessman!'; 
                 msgMiz = 'Sumdawng i ni ta!';
-                if (user.role !== 'businessman') user.cash += 500000; // First time bonus logic simplified
+                if (user.role !== 'businessman') user.cash += 500000; 
             }
 
             user.role = newRole;
@@ -247,7 +248,7 @@ async function startBot() {
             if (!isAdmin) {
                 user.cooldowns.roleChangeCount++;
                 if (user.cooldowns.roleChangeCount >= 2) {
-                    user.cooldowns.roleChange = Date.now() + (2 * 24 * 60 * 60 * 1000); // 2 Days
+                    user.cooldowns.roleChange = Date.now() + (2 * 24 * 60 * 60 * 1000); 
                 }
             }
             saveDB();
@@ -300,17 +301,14 @@ async function startBot() {
 
             // ROB LOGIC
             if (command.includes('/rob')) {
-                // Parse: @user/rob123
                 const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-                const guess = parseInt(body.replace(/\D/g, '')); // Extract numbers
+                const guess = parseInt(body.replace(/\D/g, ''));
                 
                 if (!isAdmin && user.cash < 100) return sock.sendMessage(from, { text: txt("Not enough cash (100 needed).", "Pawisa i nei tlem (100 a ngai).") });
                 if (!isAdmin) user.cash -= 100;
 
                 if (mentioned && db.users[mentioned]) {
                     const target = db.users[mentioned];
-                    
-                    // Rules: Can't rob same person if previously successful
                     if (target.robbedBy && target.robbedBy.includes(sender)) {
                         return sock.sendMessage(from, { text: txt("You already robbed this person!", "He pa hi i ru tawh!") });
                     }
@@ -329,16 +327,12 @@ async function startBot() {
                     if (stolen > 0) {
                         target.cash -= stolen;
                         user.cash += stolen;
-                        // Add to robbed list
                         if (!target.robbedBy) target.robbedBy = [];
                         target.robbedBy.push(sender);
-                        
-                        // New ID for victim
                         target.id = generateID(target.role);
                         saveDB();
                         await sock.sendMessage(from, { text: txt(`✅ Robbery Success! Stole ${formatMoney(stolen)}`, `✅ Rukruk a hlawhtling! ${formatMoney(stolen)} i ru chhuak`) });
                     } else {
-                        // Cooldown logic for failed attempt could go here
                         await sock.sendMessage(from, { text: txt(`❌ Robbery Failed. Wrong ID.`, `❌ Rukruk a hlawhchham. ID i hre sual.`) });
                     }
                 } else {
@@ -355,11 +349,9 @@ async function startBot() {
 
         // 4. POLICE COMMANDS
         if (user.role === 'police') {
-            // SCAN THIEVES
             if (command === '/scan') {
                  if (!isAdmin && user.cash < 200) return sock.sendMessage(from, { text: txt("Not enough cash (200 needed).", "Pawisa i nei tlem (200 a ngai).") });
                  if (!isAdmin) user.cash -= 200;
-                 
                  let out = "📡 *THIEVES SCAN:*\n";
                  for (let k in db.users) {
                      const t = db.users[k];
@@ -371,11 +363,9 @@ async function startBot() {
                  await sock.sendMessage(from, { text: out });
             }
 
-            // ARREST LOGIC
             if (command.includes('/arrest')) {
                 const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
                 const guess = parseInt(body.replace(/\D/g, ''));
-                
                 if (!isAdmin && user.cash < 50) return sock.sendMessage(from, { text: txt("Not enough cash (50 needed).", "Pawisa i nei tlem (50 a ngai).") });
                 if (!isAdmin) user.cash -= 50;
 
@@ -383,11 +373,10 @@ async function startBot() {
                     const thief = db.users[mentioned];
                     if (thief.role !== 'thief') return sock.sendMessage(from, { text: txt("That user is not a thief!", "Kha chu rukru a ni lo!") });
 
-                    // Guess last digit (Logic: ID 123, input 123)
                     if (parseInt(thief.id) === guess) {
                         const totalCash = thief.cash;
-                        const seized = Math.floor(totalCash * 0.80); // Thief loses 80%
-                        const reward = Math.floor(seized * 0.03); // Police gets 3% of seized
+                        const seized = Math.floor(totalCash * 0.80);
+                        const reward = Math.floor(seized * 0.03); 
                         const bankShare = seized - reward;
 
                         thief.cash -= seized;
@@ -395,9 +384,8 @@ async function startBot() {
                         db.bank += bankShare;
                         user.casesSolved++;
 
-                        // Send thief to jail (5 mins)
                         thief.cooldowns.jail = Date.now() + (5 * 60 * 1000);
-                        thief.id = generateID('thief'); // New ID
+                        thief.id = generateID('thief');
 
                         saveDB();
                         await sock.sendMessage(from, { text: txt(
@@ -413,7 +401,6 @@ async function startBot() {
 
         // 5. BUSINESSMAN COMMANDS
         if (user.role === 'businessman') {
-            // INVEST
             if (command.startsWith('/invest') && !command.includes('st')) {
                 const amount = parseInt(command.replace('/invest', ''));
                 if (isNaN(amount) || amount <= 0) return sock.sendMessage(from, { text: txt("Invalid amount.", "Zat dik lo.") });
@@ -423,31 +410,28 @@ async function startBot() {
                 db.investments.push({
                     jid: sender,
                     amount: amount,
-                    endTime: isAdmin ? Date.now() + 1000 : Date.now() + (30 * 60 * 1000) // Instant for admin, 30m for others
+                    endTime: isAdmin ? Date.now() + 1000 : Date.now() + (30 * 60 * 1000) 
                 });
                 saveDB();
                 await sock.sendMessage(from, { text: txt(`Invested ${formatMoney(amount)}. Wait 30 mins.`, `${formatMoney(amount)} i invest e. Minute 30 nghak rawh.`) });
             }
 
-            // LOAN
             if (command.startsWith('/loan')) {
                 const amount = parseInt(command.replace('/loan', ''));
                 await sock.sendMessage(OWNER_NUMBER + "@s.whatsapp.net", { text: `LOAN REQUEST: ${user.name} wants ${amount}` });
                 await sock.sendMessage(from, { text: txt("Loan request sent to bank.", "Loan dilna bank ah thawn a ni.") });
             }
             
-            // HIRE
             if (command.includes('/hire')) {
                 const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
                 if (mentioned && db.users[mentioned] && db.users[mentioned].role === 'police') {
                      if (db.users[mentioned].employer) return sock.sendMessage(from, { text: txt("Police already hired.", "Police hi chhawr lai a ni.") });
-                     
                      db.users[mentioned].employer = sender;
                      user.bodyguard = mentioned;
                      saveDB();
                      await sock.sendMessage(from, { text: txt("Bodyguard hired!", "Bodyguard chhawr a ni!") });
                 } else {
-                    await sock.sendMessage(from, { text: txt("Tag a police officer!", "Police officer tag rawh!") });
+                  await sock.sendMessage(from, { text: txt("Tag a police officer!", "Police officer tag rawh!") });
                 }
             }
         }
@@ -457,7 +441,6 @@ async function startBot() {
             let displayRole = user.role;
             if (displayRole === 'thief') displayRole = 'citizen'; // Disguise in status
             if (isAdmin) displayRole = user.role;
-
             await sock.sendMessage(from, { 
                 text: txt(
                     `👤 Role: ${displayRole}\n💰 Wealth: ${formatMoney(user.cash)}\n💼 Cases: ${user.casesSolved}`,
@@ -467,7 +450,7 @@ async function startBot() {
         }
         
         if (command === '/ubank') {
-             await sock.sendMessage(from, { text: `🏦 *Universal Bank*\n💰 Balance: ${formatMoney(db.bank)}` });
+             await sock.sendMessage(from, { text: `🏦 *Universal Bank*\n💰 Balance: ${formaMoney(db.bank)}` });
         }
 
         // 7. ADMIN
