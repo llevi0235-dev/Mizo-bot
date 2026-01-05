@@ -1,3 +1,15 @@
+// --- FIX FOR RENDER DEPLOYMENT (KEEPS BOT ALIVE) ---
+const http = require('http');
+const port = process.env.PORT || 8000;
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('WhatsApp Bot is Running!');
+});
+server.listen(port, () => {
+    console.log(`✅ Server is listening on port ${port} (Render compatible)`);
+});
+// ---------------------------------------------------
+
 console.log("▶️ SYSTEM STARTING... PLEASE WAIT...");
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
@@ -92,8 +104,6 @@ setInterval(() => {
             const profit = inv.amount * multiplier;
             const totalReturn = inv.amount + profit;
             user.cash += totalReturn;
-            // Check Loan Repayment (9% of profit goes to bank if loan active - simplified logic)
-            // (For now, just adding cash to user)
         } else {
             // 60% Fail Rate
             const lossPct = Math.floor(Math.random() * 100) + 1; // 1% to 100%
@@ -138,7 +148,6 @@ setInterval(() => {
 
     if (updated) saveDB();
 }, 60 * 1000);
-
 // --- MAIN BOT CONNECTION ---
 async function startBot() {
     console.log("▶️ Loading Authentication...");
@@ -423,8 +432,6 @@ async function startBot() {
             // LOAN
             if (command.startsWith('/loan')) {
                 const amount = parseInt(command.replace('/loan', ''));
-                // Simplified: Auto-approve for now (or notify admin)
-                // For this code, I'll just log it. Real approval needs DM logic.
                 await sock.sendMessage(OWNER_NUMBER + "@s.whatsapp.net", { text: `LOAN REQUEST: ${user.name} wants ${amount}` });
                 await sock.sendMessage(from, { text: txt("Loan request sent to bank.", "Loan dilna bank ah thawn a ni.") });
             }
@@ -433,10 +440,8 @@ async function startBot() {
             if (command.includes('/hire')) {
                 const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
                 if (mentioned && db.users[mentioned] && db.users[mentioned].role === 'police') {
-                     // Check if police already employed
                      if (db.users[mentioned].employer) return sock.sendMessage(from, { text: txt("Police already hired.", "Police hi chhawr lai a ni.") });
                      
-                     // Hire logic
                      db.users[mentioned].employer = sender;
                      user.bodyguard = mentioned;
                      saveDB();
@@ -451,7 +456,6 @@ async function startBot() {
         if (command === '/status') {
             let displayRole = user.role;
             if (displayRole === 'thief') displayRole = 'citizen'; // Disguise in status
-            // Admin sees real role
             if (isAdmin) displayRole = user.role;
 
             await sock.sendMessage(from, { 
