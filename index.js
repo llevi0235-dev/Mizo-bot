@@ -17,7 +17,7 @@ const {
     useMultiFileAuthState, 
     DisconnectReason, 
     fetchLatestBaileysVersion, 
-    makeCacheableSignalKeyStore, // <--- THE SECRET INGREDIENT FROM OLD CODE
+    makeCacheableSignalKeyStore, 
     delay 
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
@@ -144,11 +144,9 @@ setInterval(() => {
 // --- MAIN BOT CONNECTION ---
 async function startBot() {
     console.log("▶️ Loading Authentication...");
-    // USING STANDARD AUTH FOLDER (Like Old Code)
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
     
-    // --- THIS IS THE FIX: CONNECTION CONFIG FROM OLD CODE ---
     const sock = makeWASocket({
         auth: { 
             creds: state.creds, 
@@ -160,9 +158,8 @@ async function startBot() {
         markOnlineOnConnect: true,
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 10000,
-        getMessage: async (key) => { return undefined; } // Fix for "Hello" crash
+        getMessage: async (key) => { return undefined; }
     });
-    // -------------------------------------------------------
 
     // --- PAIRING CODE LOGIC ---
     if (!sock.authState.creds.me && !sock.authState.creds.registered) {
@@ -177,7 +174,7 @@ async function startBot() {
             } catch (err) {
                 console.log("❌ Error requesting code. Check internet or number.", err);
             }
-        }, 5000); // Increased wait time slightly (like old code)
+        }, 5000);
     }
 
     sock.ev.on('creds.update', saveCreds);
@@ -194,7 +191,10 @@ async function startBot() {
 
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        if (!msg.message) return;
+
+        // *** FIX: REMOVED THE CHECK THAT BLOCKS YOUR OWN MESSAGES ***
+        // if (msg.key.fromMe) return; 
 
         const from = msg.key.remoteJid;
         const type = Object.keys(msg.message)[0];
@@ -204,11 +204,14 @@ async function startBot() {
         if (!body.startsWith('/') && !body.startsWith('@')) return;
 
         const sender = msg.key.participant || from; 
-        const pushName = msg.pushName;
+        const pushName = msg.pushName || "You"; // Fallback name for self-messages
         const user = getUser(sender, pushName);
         const args = body.trim().split(/ +/);
         const command = args[0].toLowerCase();
         
+        // DEBUG: Print command to console to verify it works
+        console.log(`[CMD] Command: ${command} from ${sender}`);
+
         // ADMIN CHECK
         const isAdmin = sender.includes(ADMIN_NUMBER);
 
@@ -450,7 +453,7 @@ async function startBot() {
         }
         
         if (command === '/ubank') {
-             await sock.sendMessage(from, { text: `🏦 *Universal Bank*\n💰 Balance: ${formaMoney(db.bank)}` });
+             await sock.sendMessage(from, { text: `🏦 *Universal Bank*\n💰 Balance: ${formatMoney(db.bank)}` });
         }
 
         // 7. ADMIN
