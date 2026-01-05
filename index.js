@@ -17,7 +17,7 @@ const pino = require('pino');
 const fs = require('fs');
 
 // --- CONFIGURATION ---
-const ADMIN_NUMBER = "91923313773"; // Admin (No +)
+const ADMIN_NUMBER = "919233137736"; // Admin (No +)
 const OWNER_NUMBER = "919233137736"; // Bot Owner & Bank
 const MY_NUMBER = "919233137736";   // YOUR BOT NUMBER (Hardcoded to fix freezing)
 const DB_FILE = './database.json';
@@ -151,7 +151,7 @@ setInterval(() => {
 // --- MAIN BOT CONNECTION ---
 async function startBot() {
     console.log("▶️ Loading Authentication...");
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    const { state, saveCreds } = await useMultiFileAuthState('session_new_v2');
     const { version } = await fetchLatestBaileysVersion();
     
     const sock = makeWASocket({
