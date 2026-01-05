@@ -159,7 +159,7 @@ async function startBot() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         auth: state,
-        browser: ["Chrome", "Linux", ""]
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
     // --- PAIRING CODE LOGIC (HARDCODED) ---
