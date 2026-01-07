@@ -6,8 +6,8 @@ const {
     fetchLatestBaileysVersion, 
     makeCacheableSignalKeyStore, 
     jidNormalizedUser,
-    downloadMediaMessage,
-    getContentType
+    getContentType,
+    downloadContentFromMessage
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const admin = require("firebase-admin");
@@ -36,7 +36,16 @@ const db = admin.firestore();
 const MY_NUMBER = "919233137736"; 
 let localUsers = {};
 
-// --- HELPER FUNCTIONS ---
+// --- HELPER: BUFFER STREAM ---
+async function streamToBuffer(stream) {
+    let buffer = Buffer.alloc(0);
+    for await (const chunk of stream) {
+        buffer = Buffer.concat([buffer, chunk]);
+    }
+    return buffer;
+}
+
+// --- LOAD DATA ---
 async function loadData() {
     console.log("🔄 Loading Social Data...");
     try {
@@ -58,16 +67,11 @@ const getUser = (jid, name) => {
             bio: "I am new here! 👋",
             photos: [], 
             privacy: 'public',
-            lover: null,
-            bestie: null,
-            buddy: null,
-            since: null,
-            pendingReq: null
+            lover: null, bestie: null, buddy: null, since: null, pendingReq: null
         };
         saveUser(jid);
     }
-    // Update name
-    if (name && localUsers[jid].name !== name && name !== "User") {
+    if (name && localUsers[jid].name !== name) {
         localUsers[jid].name = name;
         saveUser(jid);
     }
@@ -127,54 +131,46 @@ async function startBot() {
         const normalizedSender = jidNormalizedUser(sender);
         
         // --- 1. ROBUST MESSAGE EXTRACTION ---
-        // This fixes the issue where "ViewOnce" or "Forwarded" messages were ignored
-        const messageType = getContentType(msg.message);
-        let actualMessage = msg.message[messageType];
-        
-        // Un-nest ViewOnce messages
-        if (messageType === 'viewOnceMessage' || messageType === 'viewOnceMessageV2') {
-            actualMessage = actualMessage.message[getContentType(actualMessage.message)];
+        let msgType = getContentType(msg.message);
+        let msgContent = msg.message[msgType];
+
+        // Handle ViewOnce
+        if (msgType === 'viewOnceMessage' || msgType === 'viewOnceMessageV2') {
+            msgType = getContentType(msgContent.message);
+            msgContent = msgContent.message[msgType];
         }
 
         let body = "";
         let caption = "";
-        const type = getContentType(msg.message); // High level type
 
-        // Extract Text & Captions safely
-        if (actualMessage) {
-            if (actualMessage.caption) caption = actualMessage.caption;
-            if (actualMessage.text) body = actualMessage.text;
-            if (actualMessage.conversation) body = actualMessage.conversation;
+        if (msgContent) {
+            if (msgContent.caption) caption = msgContent.caption;
+            if (msgContent.text) body = msgContent.text;
+            if (msgContent.conversation) body = msgContent.conversation;
         }
-        
+
         const pushName = msg.pushName || "User";
         const user = getUser(normalizedSender, pushName);
 
         // --- 2. UPLOAD LOGIC (/up in caption) ---
-        // Check both caption AND body just in case
         const txtToCheck = (caption || body || "").toLowerCase();
         
         if (txtToCheck.includes('/up')) {
-            // Verify Media
-            const isImage = (messageType === 'imageMessage' || (actualMessage && actualMessage.url && actualMessage.mimetype.includes('image')));
-            const isVideo = (messageType === 'videoMessage' || (actualMessage && actualMessage.url && actualMessage.mimetype.includes('video')));
-            
+            const isImage = msgType === 'imageMessage';
+            const isVideo = msgType === 'videoMessage';
+
             if (isImage || isVideo) {
-                if (isGroup) return sock.sendMessage(from, { text: "❌ Please upload in DM or Message Yourself!" });
+                if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only!" });
                 
                 const userCaption = (caption || body).replace(/\/up/i, '').trim() || "No Caption";
                 if (user.photos.length >= 5) return sock.sendMessage(from, { text: "❌ Gallery Full! Delete with /del [number]." });
 
-                await sock.sendMessage(from, { text: "⏳ Uploading..." });
+                await sock.sendMessage(from, { text: "⏳ Downloading & Uploading..." });
                 
                 try {
-                    // Download using the CORRECT internal message
-                    const buffer = await downloadMediaMessage(
-                        msg, 
-                        'buffer', 
-                        { }, 
-                        { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage }
-                    );
+                    // MANUAL STREAM DOWNLOAD (Much safer)
+                    const stream = await downloadContentFromMessage(msgContent, isImage ? 'image' : 'video');
+                    const buffer = await streamToBuffer(stream);
 
                     const ext = isVideo ? 'mp4' : 'jpg';
                     const tempPath = `./temp_${Date.now()}.${ext}`;
@@ -195,7 +191,7 @@ async function startBot() {
                     return sock.sendMessage(from, { text: `✅ Uploaded #${user.photos.length}!\nType /pf to check.` });
                 } catch (e) {
                     console.error("UPLOAD ERROR:", e);
-                    return sock.sendMessage(from, { text: "❌ Upload Failed. (Check Console Logs)" });
+                    return sock.sendMessage(from, { text: "❌ Upload Failed. " + e.message });
                 }
             }
         }
@@ -207,8 +203,7 @@ async function startBot() {
         const args = fullText.trim().split(/ +/);
         let command = args[0].toLowerCase();
         
-        // Handle @user/pf
-        let mentionedJid = actualMessage?.contextInfo?.mentionedJid?.[0];
+        let mentionedJid = msgContent?.contextInfo?.mentionedJid?.[0];
         if (fullText.includes('/') && command.includes('@')) {
             const parts = command.split('/');
             if (parts.length > 1) command = '/' + parts[1].replace(/\d+/g, ''); 
@@ -216,7 +211,6 @@ async function startBot() {
 
         // --- COMMANDS ---
 
-        // /pf OR @user/pf
         if (command === '/pf' || command === '/mypf') {
             const targetJid = mentionedJid || normalizedSender;
             const t = getUser(targetJid);
@@ -250,17 +244,14 @@ async function startBot() {
                         : { image: { url: main.url }, caption: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) };
                     await sock.sendMessage(from, msgContent, { quoted: msg });
                 } else {
-                    // Fallback to TEXT ONLY if no photos
                     await sock.sendMessage(from, { text: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) }, { quoted: msg });
                 }
             } catch (e) {
                 console.error("SEND PROFILE ERROR:", e);
-                // Last Resort: Send text if image fails
                 await sock.sendMessage(from, { text: txt + "\n(Image failed to load)", mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) });
             }
         }
 
-        // /bio
         if (command === '/bio') {
             if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only." });
             const newBio = fullText.replace('/bio', '').trim();
@@ -270,7 +261,6 @@ async function startBot() {
             await sock.sendMessage(from, { text: "✅ Bio Updated!" });
         }
 
-        // /del
         if (command.startsWith('/del')) {
             if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only." });
             let index = parseInt(fullText.replace(/\D/g, ''));
@@ -280,7 +270,6 @@ async function startBot() {
             await sock.sendMessage(from, { text: `🗑️ Deleted #${index}` });
         }
 
-        // /like [number]
         if (command === '/like') {
             let photoIndex = 1;
             const parts = fullText.split(' ');
@@ -288,10 +277,8 @@ async function startBot() {
 
             let targetJid = mentionedJid;
             if (!targetJid) {
-                // Check reply context
-                const quotedKey = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-                const participant = msg.message.extendedTextMessage?.contextInfo?.participant;
-                if (participant) targetJid = participant;
+                const quotedPart = msgContent?.contextInfo?.participant;
+                if (quotedPart) targetJid = quotedPart;
             }
 
             if (!targetJid) return sock.sendMessage(from, { text: "❌ Reply to user or mention: /like @user" });
@@ -310,7 +297,6 @@ async function startBot() {
             return sock.sendMessage(from, { text: `❤️ Liked Photo #${photoIndex} of @${t.name}!` });
         }
 
-        // /top
         if (command === '/top') {
             const sorted = Object.values(localUsers)
                 .map(u => ({ name: u.name, likes: getTotalLikes(u) }))
@@ -321,11 +307,9 @@ async function startBot() {
             await sock.sendMessage(from, { text: out });
         }
 
-        // /public /private
         if (command === '/public') { user.privacy = 'public'; await saveUser(normalizedSender); await sock.sendMessage(from, { text: "✅ Public" }); }
         if (command === '/private') { user.privacy = 'private'; await saveUser(normalizedSender); await sock.sendMessage(from, { text: "🔒 Private" }); }
 
-        // DM Logic
         if (['/propose', '/invbs', '/invbd', '/accept', '/decline', '/end'].includes(command)) {
             if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only." });
             
@@ -388,9 +372,7 @@ async function startBot() {
         }
     });
 }
-
 keepAlive();
 startBot();
-
 process.on('uncaughtException', (err) => console.error(err));
 process.on('unhandledRejection', (err) => console.error(err));
