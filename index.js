@@ -725,3 +725,16 @@ async function startBot() {
 // Start the Web Server first, then the Bot
 keepAlive();
 startBot();
+// --- ANTI-CRASH HANDLERS (Paste at bottom of index.js) ---
+
+process.on('uncaughtException', (err) => {
+    console.error('❌ CRASH PREVENTED (Uncaught Exception):', err);
+    // Bot stays alive
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ CRASH PREVENTED (Unhandled Rejection):', reason);
+    // Bot stays alive
+});
+
+console.log("🛡️ Anti-Crash Shield Activated!");
