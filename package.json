@@ -4,8 +4,7 @@
   "description": "Mizo/English WhatsApp Game Bot",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
   "keywords": [
     "whatsapp",
@@ -18,6 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",
-    "pino": "^9.5.0"
+    "pino": "^9.5.0",
+    "firebase-admin": "^12.0.0"
   }
 }
