@@ -55,9 +55,8 @@ const getUser = (jid, name) => {
             id: jid,
             name: name || 'User',
             bio: "I am new here! 👋",
-            photos: [], // Array of {url, caption, type}
-            likes: 0,
-            likedBy: [],
+            photos: [], // {url, caption, type, likes: []}
+            privacy: 'public', // 'public' or 'private'
             lover: null,
             bestie: null,
             buddy: null,
@@ -78,6 +77,11 @@ function formatDuration(ms) {
     const seconds = Math.floor((Date.now() - ms) / 1000);
     const days = Math.floor(seconds / (3600 * 24));
     return `${days}d`;
+}
+
+function getTotalLikes(user) {
+    if (!user.photos) return 0;
+    return user.photos.reduce((sum, photo) => sum + (photo.likes ? photo.likes.length : 0), 0);
 }
 
 // --- MAIN BOT ---
@@ -117,7 +121,7 @@ async function startBot() {
 
         const from = msg.key.remoteJid;
         const isGroup = from.endsWith('@g.us');
-        // FIX: Always use normalized sender to ensure Group vs DM data is the SAME
+        // FIX: Always use normalized sender (Phone Number) for data ID
         const sender = isGroup ? (msg.key.participant || from) : from;
         const normalizedSender = jidNormalizedUser(sender);
         
@@ -132,41 +136,32 @@ async function startBot() {
         else if (type === 'videoMessage') caption = msg.message.videoMessage.caption || "";
 
         const pushName = msg.pushName || "User";
-        if (localUsers[normalizedSender]?.name !== pushName) getUser(normalizedSender, pushName);
         const user = getUser(normalizedSender, pushName);
 
-        // --- 2. MEDIA UPLOAD LOGIC (/upload) ---
-        // Checks if Image or Video has caption starting with /upload
-        if ((type === 'imageMessage' || type === 'videoMessage') && caption.toLowerCase().startsWith('/upload')) {
+        // --- 2. MEDIA UPLOAD LOGIC (/up in caption) ---
+        if ((type === 'imageMessage' || type === 'videoMessage') && caption.toLowerCase().includes('/up')) {
             
-            if (isGroup) return sock.sendMessage(from, { text: "❌ Uploads are DM Only! Message the bot privately." });
+            if (isGroup) return sock.sendMessage(from, { text: "❌ Please upload in DM or Message Yourself!" });
 
-            const userCaption = caption.replace('/upload', '').trim() || "No Caption";
-            
-            // Limit Photos
+            const userCaption = caption.replace(/\/up/i, '').trim() || "No Caption";
             if (user.photos.length >= 5) return sock.sendMessage(from, { text: "❌ Gallery Full! Delete old ones using /del [number]." });
 
             await sock.sendMessage(from, { text: "⏳ Uploading..." });
-            
             try {
                 const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }) });
                 const isVideo = type === 'videoMessage';
                 const tempPath = `./temp_${Date.now()}.${isVideo ? 'mp4' : 'jpg'}`;
                 fs.writeFileSync(tempPath, buffer);
-                
-                // Upload to Cloudinary (Supports Video too)
                 const result = await cloudinary.uploader.upload(tempPath, { resource_type: "auto" });
-                
-                // Save to Gallery
                 user.photos.push({
                     url: result.secure_url,
                     caption: userCaption,
-                    type: isVideo ? 'video' : 'image'
+                    type: isVideo ? 'video' : 'image',
+                    likes: [] 
                 });
-
                 fs.unlinkSync(tempPath); 
                 await saveUser(normalizedSender);
-                return sock.sendMessage(from, { text: `✅ Uploaded #${user.photos.length}! \nTo view: /pf\nTo delete: /del ${user.photos.length}` });
+                return sock.sendMessage(from, { text: `✅ Uploaded #${user.photos.length}!\nType /pf to check.` });
             } catch (e) {
                 console.error(e);
                 return sock.sendMessage(from, { text: "❌ Upload Error." });
@@ -174,14 +169,12 @@ async function startBot() {
         }
 
         // --- 3. TEXT COMMANDS ---
-        
-        const fullText = body || caption; // Use caption if it was media
+        const fullText = body || caption;
         if (!fullText.startsWith('/') && !fullText.startsWith('@')) return; 
 
         const args = fullText.trim().split(/ +/);
         let command = args[0].toLowerCase();
-
-        // Handle @user/pf style
+        
         let mentionedJid = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
         if (fullText.includes('/') && command.includes('@')) {
             const parts = command.split('/');
@@ -190,139 +183,145 @@ async function startBot() {
 
         // --- COMMAND LIST ---
 
-        // /bio [text] (DM Only)
         if (command === '/bio') {
             if (isGroup) return sock.sendMessage(from, { text: "❌ Edit Bio in DM Only." });
             const newBio = fullText.replace('/bio', '').trim();
-            if (!newBio) return sock.sendMessage(from, { text: "❌ Usage: /bio I am the king" });
-            
+            if (!newBio) return sock.sendMessage(from, { text: "❌ Usage: /bio My Bio Text" });
             user.bio = newBio;
             await saveUser(normalizedSender);
             await sock.sendMessage(from, { text: "✅ Bio Updated!" });
         }
 
-        // /del [number] (DM Only)
-        if (command.startsWith('/del')) {
-            if (isGroup) return sock.sendMessage(from, { text: "❌ Delete in DM Only." });
-            
-            // Try to find number in /del#1 or /del 1
-            let indexStr = fullText.replace('/del', '').replace('#', '').trim();
-            let index = parseInt(indexStr);
-
-            if (!index || index < 1 || index > user.photos.length) {
-                return sock.sendMessage(from, { text: `❌ Usage: /del 1 (to delete Photo #1).\nYou have ${user.photos.length} items.` });
-            }
-
-            // Remove item (Arrays are 0-based, so minus 1)
-            const deleted = user.photos.splice(index - 1, 1);
-            await saveUser(normalizedSender);
-            await sock.sendMessage(from, { text: `🗑️ Deleted #${index} (${deleted[0].caption})` });
+        if (command === '/public') {
+            user.privacy = 'public'; await saveUser(normalizedSender);
+            await sock.sendMessage(from, { text: "✅ Your profile is now PUBLIC." });
+        }
+        if (command === '/private') {
+            user.privacy = 'private'; await saveUser(normalizedSender);
+            await sock.sendMessage(from, { text: "🔒 Your profile is now PRIVATE." });
         }
 
-        // /pf or @user/pf
+        if (command.startsWith('/del')) {
+            if (isGroup) return sock.sendMessage(from, { text: "❌ Delete in DM Only." });
+            let indexStr = fullText.replace('/del', '').replace('#', '').trim();
+            let index = parseInt(indexStr);
+            if (!index || index < 1 || index > user.photos.length) return sock.sendMessage(from, { text: `❌ Usage: /del 1` });
+            user.photos.splice(index - 1, 1);
+            await saveUser(normalizedSender);
+            await sock.sendMessage(from, { text: `🗑️ Deleted #${index}` });
+        }
+
+        // /pf OR @user/pf
         if (command === '/pf' || command === '/mypf') {
             const targetJid = mentionedJid || normalizedSender;
             const t = getUser(targetJid);
+            const totalLikes = getTotalLikes(t);
+            const isMe = targetJid === normalizedSender;
+
+            if (!isMe && t.privacy === 'private') return sock.sendMessage(from, { text: `🔒 @${t.name}'s profile is Private.` });
             
-            // Stats
             let status = "";
             if (t.lover) status += `❤️ Lover: @${t.lover.split('@')[0]} (${formatDuration(t.since)})\n`;
             else status += `💔 Single\n`;
             if (t.bestie) status += `💛 Bestie: @${t.bestie.split('@')[0]}\n`;
             if (t.buddy) status += `💙 Buddy: @${t.buddy.split('@')[0]}\n`;
 
-            // Gallery List
             let galleryTxt = "";
             if (t.photos.length > 0) {
                 galleryTxt = "\n📸 *Gallery:*\n";
                 t.photos.forEach((p, i) => {
-                    galleryTxt += `#${i+1} [${p.type === 'video'?'Vid':'Img'}]: ${p.caption}\n`;
+                    const pLikes = p.likes ? p.likes.length : 0;
+                    // THIS IS THE LINE THAT SHOWS LIKES PER PHOTO
+                    galleryTxt += `#${i+1}: ${p.caption} (❤️ ${pLikes} likes)\n`;
                 });
-            } else {
-                galleryTxt = "\n(No Photos Uploaded)";
-            }
+            } else { galleryTxt = "\n(No Photos Uploaded)"; }
 
-            const txt = `👤 *${t.name}*\n📝 ${t.bio}\n👍 Likes: ${t.likes}\n\n${status}${galleryTxt}`;
+            const txt = `👤 *${t.name}*\n❤️ ${totalLikes} Total Likes\n\n📝 ${t.bio}\n\n${status}${galleryTxt}\n\n*To Like:* /like [number] @user\n(Ex: /like 2 @${t.name.replace(/ /g,'')})`;
 
-            // Send Profile Pic (Photo #1) if exists
             if (t.photos.length > 0) {
                 const main = t.photos[0];
-                if (main.type === 'image') {
-                    await sock.sendMessage(from, { image: { url: main.url }, caption: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) });
-                } else if (main.type === 'video') {
-                    await sock.sendMessage(from, { video: { url: main.url }, caption: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) });
-                }
+                const msgContent = main.type === 'video' 
+                    ? { video: { url: main.url }, caption: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) }
+                    : { image: { url: main.url }, caption: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) };
+                await sock.sendMessage(from, msgContent, { quoted: msg });
             } else {
-                await sock.sendMessage(from, { text: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) });
+                await sock.sendMessage(from, { text: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) }, { quoted: msg });
             }
         }
 
-        // /like @user
+        // /like [number] @user OR /like [number] (Reply)
         if (command === '/like') {
-            if (!mentionedJid) return sock.sendMessage(from, { text: "Mention someone! (/like @user)" });
-            if (mentionedJid === normalizedSender) return sock.sendMessage(from, { text: "No self-likes." });
+            // Parse arguments: /like 2 @user
+            let photoIndex = 1; // Default to photo #1
+            const parts = fullText.split(' ');
+            if (parts[1] && !isNaN(parts[1])) photoIndex = parseInt(parts[1]);
+
+            let targetJid = mentionedJid;
             
-            const t = getUser(mentionedJid);
-            if (t.likedBy.includes(normalizedSender)) return sock.sendMessage(from, { text: "Already liked!" });
-            
-            t.likes++;
-            t.likedBy.push(normalizedSender);
-            await saveUser(mentionedJid);
-            await sock.sendMessage(from, { text: `❤️ Liked @${t.name}! Total: ${t.likes}` });
+            // If no mention, check if replying
+            if (!targetJid) {
+                const quotedMsg = msg.message.extendedTextMessage?.contextInfo;
+                if (quotedMsg?.participant) targetJid = quotedMsg.participant;
+            }
+
+            if (!targetJid) return sock.sendMessage(from, { text: "❌ Mention user or Reply to them! (/like 2 @user)" });
+            if (targetJid === normalizedSender) return sock.sendMessage(from, { text: "❌ No self-likes." });
+
+            const t = getUser(targetJid);
+            if (t.photos.length === 0) return sock.sendMessage(from, { text: "❌ They have no photos." });
+            if (photoIndex < 1 || photoIndex > t.photos.length) return sock.sendMessage(from, { text: "❌ Invalid photo number." });
+
+            const photo = t.photos[photoIndex - 1];
+            if (!photo.likes) photo.likes = [];
+
+            if (photo.likes.includes(normalizedSender)) {
+                return sock.sendMessage(from, { text: "❌ You already liked this photo!" });
+            }
+
+            photo.likes.push(normalizedSender);
+            await saveUser(targetJid);
+            return sock.sendMessage(from, { text: `❤️ Liked Photo #${photoIndex} of @${t.name}!` });
         }
 
         // /top
         if (command === '/top') {
-            const sorted = Object.values(localUsers).sort((a,b) => b.likes - a.likes).slice(0, 50);
-            let out = "🔥 *TOP 50*\n";
-            sorted.forEach((u, i) => out += `${i+1}. ${u.name} - ${u.likes}\n`);
+            const sorted = Object.values(localUsers)
+                .map(u => ({ name: u.name, likes: getTotalLikes(u) }))
+                .sort((a,b) => b.likes - a.likes)
+                .slice(0, 50);
+            let out = "🔥 *TOP 50 STARS*\n";
+            sorted.forEach((u, i) => out += `${i+1}. ${u.name} - ❤️ ${u.likes}\n`);
             await sock.sendMessage(from, { text: out });
         }
 
         // /help
         if (command === '/help') {
-            await sock.sendMessage(from, { text: `🤖 *SOCIAL BOT COMMANDS*\n\n*DM ONLY:*\n📸 Attach Photo + Caption: */upload My Pic*\n📝 */bio I am cool* (Set Bio)\n🗑️ */del 1* (Delete Photo #1)\n💍 */propose* (Get Lover)\n💛 */invbs* (Get Bestie)\n💙 */invbd* (Get Buddy)\n✅ */accept* | ❌ */decline*\n💔 */end* (Breakup)\n\n*PUBLIC / GROUP:*\n👤 */pf* (My Profile)\n🔎 *@user/pf* (Check User)\n❤️ */like @user*\n🔥 */top*` });
+            await sock.sendMessage(from, { text: `🤖 *COMMANDS*\n\n*SETUP (DM/Self):*\n📎 Attach Media + Caption: "My Pic /up"\n📝 /bio [text]\n🔒 /private | 🔓 /public\n🗑️ /del [number]\n\n*PROFILE:*\n👤 /pf (Me)\n🔎 @user/pf (Others)\n❤️ /like [number] @user\n🔥 /top\n\n*RELATIONSHIPS (DM):*\n💍 /propose\n💛 /invbs\n💙 /invbd\n✅ /accept | ❌ /decline\n💔 /end` });
         }
 
-        // DM Relationships (Only check group restriction)
+        // DM Relationships
         if (['/propose', '/invbs', '/invbd', '/accept', '/decline', '/end'].includes(command)) {
             if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only." });
             
-            // PROPOSE/INVITE
             if (['/propose', '/invbs', '/invbd'].includes(command)) {
                 if (command === '/propose' && user.lover) return sock.sendMessage(from, { text: "❌ Already taken!" });
-                
                 let type = command === '/propose' ? 'lover' : (command === '/invbs' ? 'bestie' : 'buddy');
-                
-                // We need to ask for number (using a small state just for this or simple parsing)
-                // Simplified: "Please type: /req [number]" to confirm
-                // But you liked the "State" for this part. 
-                // Let's stick to your request: "DM the user" -> The bot needs to know WHO.
-                // We will use a dedicated command: /connect [number] [type] ? 
-                // OR: Just ask for number. 
-                // Since we removed userSteps to stop SPAM, we need a one-shot command or a safe step.
-                // SAFE STEP: Only activate step if command is explicit.
-                
-                user.pendingAction = type; // Safe temporary tag
+                user.pendingAction = type; 
                 await saveUser(normalizedSender);
                 await sock.sendMessage(from, { text: `📱 Please type the **Phone Number** of the person (e.g. 919876543210).` });
             }
 
-            // ACCEPT / DECLINE
             if (command === '/accept' && user.pendingReq) {
                 const req = user.pendingReq;
                 const rUser = getUser(req.from);
-                
                 if (req.type === 'lover' && (user.lover || rUser.lover)) {
                     user.pendingReq = null; await saveUser(normalizedSender);
-                    return sock.sendMessage(from, { text: "❌ Someone is already taken." });
+                    return sock.sendMessage(from, { text: "❌ Taken." });
                 }
-
                 const now = Date.now();
                 if (req.type === 'lover') { user.lover = req.from; user.since = now; rUser.lover = normalizedSender; rUser.since = now; }
                 else if (req.type === 'bestie') { user.bestie = req.from; rUser.bestie = normalizedSender; }
                 else if (req.type === 'buddy') { user.buddy = req.from; rUser.buddy = normalizedSender; }
-
                 user.pendingReq = null;
                 await saveUser(normalizedSender); await saveUser(req.from);
                 await sock.sendMessage(from, { text: "✅ Connected!" });
@@ -336,14 +335,12 @@ async function startBot() {
                 await sock.sendMessage(f, { text: "❌ Request Declined." });
             }
 
-            // END
             if (command === '/end') {
                 if (!args[1]) return sock.sendMessage(from, { text: "💔 Usage:\n/end 1 (Lover)\n/end 2 (Bestie)\n/end 3 (Buddy)" });
                 let tJid = null, type = "";
                 if (args[1] === '1') { tJid = user.lover; type = 'lover'; user.lover = null; }
                 if (args[1] === '2') { tJid = user.bestie; type = 'bestie'; user.bestie = null; }
                 if (args[1] === '3') { tJid = user.buddy; type = 'buddy'; user.buddy = null; }
-                
                 if (tJid) {
                     const t = getUser(tJid);
                     if (type === 'lover') t.lover = null;
@@ -352,40 +349,26 @@ async function startBot() {
                     await saveUser(normalizedSender); await saveUser(tJid);
                     await sock.sendMessage(from, { text: "✅ Ended." });
                     await sock.sendMessage(tJid, { text: `💔 Broken up by @${user.name}`, mentions: [normalizedSender] });
-                } else {
-                    await sock.sendMessage(from, { text: "❌ Nothing to end there." });
                 }
             }
         }
 
-        // --- 4. HANDLE NUMBER INPUT FOR RELATIONSHIP ---
-        // (Only if user.pendingAction exists - Safe from spam because it requires /propose first)
+        // Handle Number Input
         if (user.pendingAction && /^\d{10,15}$/.test(body.replace(/\D/g, ''))) {
             const targetNum = body.replace(/\D/g, '');
             const targetJid = targetNum + "@s.whatsapp.net";
             if (targetJid === normalizedSender) return sock.sendMessage(from, { text: "❌ Cannot choose yourself." });
-            
             const target = getUser(targetJid, "Unknown");
             target.pendingReq = { from: normalizedSender, type: user.pendingAction };
-            
-            const types = { lover: "❤️ LOVER", bestie: "💛 BESTIE", buddy: "💙 BUDDY" };
-            const typeName = types[user.pendingAction];
-            
-            user.pendingAction = null; // Clear state
+            user.pendingAction = null; 
             await saveUser(normalizedSender);
             await saveUser(targetJid);
-            
             await sock.sendMessage(from, { text: "✅ Request Sent!" });
-            await sock.sendMessage(targetJid, { text: `💌 *REQUEST*\n\n@${user.name} wants to be your ${typeName}.\n\nReply */accept* or */decline*`, mentions: [normalizedSender] });
+            await sock.sendMessage(targetJid, { text: `💌 *REQUEST*\n\n@${user.name} wants to connect.\nReply */accept* or */decline*`, mentions: [normalizedSender] });
         }
-
     });
 }
-
-// Start
 keepAlive();
 startBot();
-
-// Anti-Crash
 process.on('uncaughtException', (err) => console.error(err));
 process.on('unhandledRejection', (err) => console.error(err));
