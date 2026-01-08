@@ -1,13 +1,25 @@
 {
-  "name": "discord-game-bot",
+  "name": "sector-7-bot",
   "version": "1.0.0",
+  "description": "Sector 7 Roleplay Bot with Firebase Integration",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": [
+    "discord",
+    "bot",
+    "roleplay",
+    "economy"
+  ],
+  "author": "YourName",
+  "license": "ISC",
   "dependencies": {
-    "discord.js": "^14.14.1",
+    "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
-    "firebase": "^10.8.1"
+    "firebase": "^10.14.1"
+  },
+  "engines": {
+    "node": ">=16.9.0"
   }
 }

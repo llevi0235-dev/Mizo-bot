@@ -1,4 +1,13 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Environment Variables (SENSITIVE)
 .env
+
+# Logs
 npm-debug.log
+*.log
+
+# System Files
 .DS_Store
+Thumbs.db
