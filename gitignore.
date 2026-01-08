@@ -1,15 +1,4 @@
-# Dependencies
-node_modules/
-
-# WhatsApp Session (CRITICAL SECURITY - DO NOT UPLOAD)
-auth_info_baileys/
-
-# Game Database (To prevent conflicts)
-database.json
-
-# Logs and system files
+node_modules
+.env
 npm-debug.log
 .DS_Store
-
-# Environment variables (If you use them later)
-.env

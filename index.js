@@ -1,378 +1,424 @@
-const keepAlive = require('./keep_alive');
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    makeCacheableSignalKeyStore, 
-    jidNormalizedUser,
-    getContentType,
-    downloadContentFromMessage
-} = require('@whiskeysockets/baileys');
-const pino = require('pino');
-const admin = require("firebase-admin");
-const cloudinary = require('cloudinary').v2;
-const fs = require('fs');
+require('dotenv').config();
+const { Client, GatewayIntentBits, Partials } = require('discord.js');
+const { initializeApp } = require("firebase/app");
+const { getDatabase, ref, set, get, update, child } = require("firebase/database");
 
-// --- 1. CLOUDINARY CONFIG ---
-cloudinary.config({ 
-  cloud_name: 'dma9eonrp', 
-  api_key: '617177728891958', 
-  api_secret: '8bCJRo8QbKRmF374p9PZn1zF3j4'
+// --- 1. FIREBASE CONFIGURATION ---
+const firebaseConfig = {
+  apiKey: process.env.FB_API_KEY,
+  authDomain: process.env.FB_AUTH_DOMAIN,
+  databaseURL: process.env.FB_DB_URL,
+  projectId: process.env.FB_PROJECT_ID,
+  storageBucket: process.env.FB_STORAGE_BUCKET,
+  messagingSenderId: process.env.FB_SENDER_ID,
+  appId: process.env.FB_APP_ID
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// --- 2. DISCORD CONFIGURATION ---
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
+    partials: [Partials.Channel]
 });
 
-// --- 2. FIREBASE CONFIG ---
-const serviceAccount = {
-  "type": "service_account",
-  "project_id": "j-bo-a567a",
-  "private_key_id": "774d8e00478d3c5fb6aefa442a76fa9c1efbc20e",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC8PLn6M8+z3eck\nKYMChU6QBSYzOLkNe7HVimJvSnKac20nau0WzG6Ppj1RfKlIBfBX1Y/DFN/sw36f\nv0wLmpKr6rNnXRMoFz6i1fhIniWiSRfN9rDUGz1IctZ2Id4J9LGVVuovLPNlYTjP\nD6PacbAstZlcOT4ETCx9wNHiiQ1PJf9Xlo7wyeQDBQOYy9V7+gj5Wf8dWKhRUTi9\nm6WNnqMoDDeAs02GY97HsEAfm8wPnHH9J3Fn2+kB6Mpc/35gtFV+cyJAzyRZCovt\niPaX7+uDSHUpYukT4hxSOU+jl7tKYRh96mQrzcr/V3FEpp6aZ808yojzKiIRPmIG\nC0MCN7uPAgMBAAECggEAAy/OADffVM61ao3PW3wRQ+vqZSSZMWq+LHzOxM6QWSAK\nIYg0YlXsqz7nu9jt7ru3AW2qpOVWEyaOHrs42NtxjzqGdgID4IJgO5Z+wQ/4WCJ/\npit+e+DILVFQYyiYnzeGyB30Ef9jUXyPXyYHIpwZHPCoG4EWlTEK8cgRZZHnaUcW\ncKDWZFAlki+9P8LLZ5/228GC4Rm562UiOnss8L3D5uUi2pSNX2V0B6CLrCmiP/if\ng4piKHkgWN6c8PXk8SUmnxF0kfChTdKcGx/6nTLZJHxiBsH+vTZ/2ehpL66+dNIv\nKPsb4XWzJFbHxPI1ee/F0H5X65jXXO2vMhfu/jDv/QKBgQDwGd+iVpBulS+Sp6am\nCw6uG9q4RAyE0x1RzKgxmfq/rWPxy0e7BtWEvd3ng/0BYL89pROXb7tGfT4CGUHc\nXueU9koCrZw7CToHJfakkk9+1TDes92/AGJjL8cxr8ZfKsjsGHR4DAlYVLDi4yJk\nRGmSaXWdjWV7e1MA9CG2HPF30wKBgQDIs6vYJc9Y+MecqofJPoi4QwzqpQL9vWln\nbxHQCLR363pMdyS/Y1TM7PZjDuq5PQaf8ae02qSoDopK1+kIjzf7bxu1dhSDdA9L\ngNTykn+yZnF0vUYPJcmLH9jjNXpXQ1NrO8BANgPC1oITO1XAtIlrkH9lAiVWdV/8\nouYvTdAz1QKBgQCad9rjgxOKwVoI3Oke/BAmvW7ai5UOQxAi1ysCNlEWzgN1xNVS\nItRtgQVpdAXqxAZlL3XKQKzYbazeBsfTcg9FS6pTzMOtS4NUo/zo5eRU8e1t6YPo\n5ONnco6Rjcdu5IS9OAJ+VSgR9vKSFZTDsyvEcSqlARnf9nhxLZ8encJP1wKBgGMg\nosKaQiQOlACkFXbnJP3lWA7Yu3Z5xAKrUB/w/LmyG3CC9Cp3NB4W98aLSpF9O7Vp\n1Mw1pVe//rvikh2BJ0RPZ18j2BPpEdjX49V/WATUJjtjdKPspPPLIgNumWNaRGxV\nUaolQ4xLCGnZR4xrXug6sUFBYxGl3WfZSVmZ1DiVAoGAUbbKBgOJ/aK/xNozElae\n/EIzY4U8BLMw/9iECvFJRr7QAqyZUPk6cYp9QJL2YnLT+mTKQ0k7OpPaT8n+EFPB\nXBDd9uHjON0KsPJjzmXCeBpQFyUjX//Nja8ridN0h8ANeeQ+r7Zj+O9xZKUv1JT3\nUP0fL4evPSOlU19WuNWjLmQ=\n-----END PRIVATE KEY-----\n",
-  "client_email": "firebase-adminsdk-fbsvc@j-bo-a567a.iam.gserviceaccount.com",
-};
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
+const TOKEN = process.env.DISCORD_TOKEN;
+const ADMIN_ID = process.env.ADMIN_ID;
 
-// --- VARIABLES ---
-const MY_NUMBER = "919233137736"; 
-let localUsers = {};
+// --- 3. GLOBAL VARIABLES (Cache) ---
+let users = {}; 
+let universalBank = 0;
+let activeInvestments = []; 
 
-// --- HELPER: BUFFER STREAM ---
-async function streamToBuffer(stream) {
-    let buffer = Buffer.alloc(0);
-    for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk]);
-    }
-    return buffer;
-}
+// --- 4. CORE FUNCTIONS ---
 
-// --- LOAD DATA ---
-async function loadData() {
-    console.log("🔄 Loading Social Data...");
-    try {
-        const usersSnap = await db.collection('social_users').get();
-        usersSnap.forEach(doc => { localUsers[doc.id] = doc.data(); });
-        console.log("✅ Data Loaded.");
-    } catch (e) { console.error("Error loading:", e); }
-}
-
-async function saveUser(jid) {
-    if (localUsers[jid]) await db.collection('social_users').doc(jid).set(localUsers[jid]);
-}
-
-const getUser = (jid, name) => {
-    if (!localUsers[jid]) {
-        localUsers[jid] = {
-            id: jid,
-            name: name || 'User',
-            bio: "I am new here! 👋",
-            photos: [], 
-            privacy: 'public',
-            lover: null, bestie: null, buddy: null, since: null, pendingReq: null
-        };
-        saveUser(jid);
-    }
-    if (name && localUsers[jid].name !== name) {
-        localUsers[jid].name = name;
-        saveUser(jid);
-    }
-    return localUsers[jid];
-};
-
-function formatDuration(ms) {
-    if (!ms) return "";
-    const seconds = Math.floor((Date.now() - ms) / 1000);
-    const days = Math.floor(seconds / (3600 * 24));
-    return `${days}d`;
-}
-
-function getTotalLikes(user) {
-    if (!user.photos) return 0;
-    return user.photos.reduce((sum, photo) => sum + (photo.likes ? photo.likes.length : 0), 0);
-}
-
-// --- MAIN BOT ---
-async function startBot() {
-    await loadData();
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-    const { version } = await fetchLatestBaileysVersion();
+// Load Data from Firebase
+async function loadDatabase() {
+    console.log("📥 Loading Game Data...");
+    const dbRef = ref(db);
     
-    const sock = makeWASocket({
-        auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })) },
-        version,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: false,
-        markOnlineOnConnect: true,
-        connectTimeoutMs: 60000
-    });
+    const uSnap = await get(child(dbRef, `users`));
+    if (uSnap.exists()) users = uSnap.val();
 
-    if (!sock.authState.creds.me && !sock.authState.creds.registered) {
-        setTimeout(async () => {
-            try {
-                const code = await sock.requestPairingCode(MY_NUMBER);
-                console.log(`CODE: ${code}`);
-            } catch (err) {}
-        }, 5000);
+    const bSnap = await get(child(dbRef, `universalBank`));
+    if (bSnap.exists()) universalBank = bSnap.val();
+    
+    console.log("✅ Data Loaded.");
+}
+
+// Save User
+function saveUser(userId) {
+    if(users[userId]) set(ref(db, 'users/' + userId), users[userId]);
+}
+
+// Save Bank
+function saveBank() {
+    set(ref(db, 'universalBank'), universalBank);
+}
+
+function generateID() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function formatMoney(amount) {
+    return `$${amount.toLocaleString()}`;
+}
+
+function getUser(userId) {
+    if (!users[userId]) {
+        users[userId] = {
+            id: generateID(),
+            role: 'citizen',
+            cash: 10000,
+            jailTime: 0,
+            casesSolved: 0,
+            bodyguard: null,
+            lastIncome: Date.now(),
+            investmentHistory: []
+        };
+        saveUser(userId);
+    }
+    return users[userId];
+}
+
+// --- 5. AUTOMATIC LOOP (Income & Investments) ---
+// Runs every 1 Minute
+setInterval(() => {
+    const now = Date.now();
+
+    // Income Logic
+    for (const userId in users) {
+        const user = users[userId];
+        // 30 Mins = 1800000, 20 Mins = 1200000
+        let interval = 1800000;
+        let amount = 0;
+
+        if (user.role === 'citizen') amount = 400;
+        if (user.role === 'thief') { amount = 50; interval = 1200000; }
+        if (user.role === 'police') amount = 450;
+        if (user.role === 'businessman') amount = 1000;
+
+        if (now - user.lastIncome >= interval) {
+            user.cash += amount;
+            user.lastIncome = now;
+            saveUser(userId);
+        }
     }
 
-    sock.ev.on('creds.update', saveCreds);
-    sock.ev.on('connection.update', (update) => {
-        if (update.connection === 'close' && update.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
-            startBot();
-        } else if (update.connection === 'open') console.log('✅ SOCIAL BOT CONNECTED!');
+    // Investment Logic
+    activeInvestments = activeInvestments.filter(inv => {
+        if (now >= inv.endTime) {
+            const user = users[inv.userId];
+            const success = Math.random() < 0.4; // 40% Success
+
+            if (success) {
+                const multiplier = Math.floor(Math.random() * 5) + 1; // 1x-5x
+                const profit = inv.amount * multiplier;
+                user.cash += profit;
+                user.investmentHistory.push(`WIN: +${profit}`);
+            } else {
+                // Fail: Lose 1% to 100%
+                const lossPercent = Math.random(); 
+                const lost = Math.floor(inv.amount * lossPercent);
+                const returned = inv.amount - lost;
+                
+                user.cash += returned; // Give back what wasn't lost
+                universalBank += lost; // Lost money goes to Bank
+                user.investmentHistory.push(`LOSS: -${lost}`);
+                saveBank();
+            }
+            saveUser(inv.userId);
+            return false; // Remove from active list
+        }
+        return true; // Keep waiting
     });
 
-    sock.ev.on('messages.upsert', async m => {
-        const msg = m.messages[0];
-        if (!msg.message) return;
+}, 60000); 
 
-        const from = msg.key.remoteJid;
-        const isGroup = from.endsWith('@g.us');
-        const sender = isGroup ? (msg.key.participant || from) : from;
-        const normalizedSender = jidNormalizedUser(sender);
+// --- END OF PART 1 ---
+// --- START OF PART 2 ---
+
+client.on('ready', async () => {
+    await loadDatabase();
+    console.log(`🤖 Bot Online: ${client.user.tag}`);
+});
+
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+
+    const content = message.content.toLowerCase();
+    const args = message.content.split(' ');
+    const authorId = message.author.id;
+    const user = getUser(authorId);
+
+    // --- JAIL CHECK ---
+    if (user.jailTime > Date.now()) {
+        const minsLeft = Math.ceil((user.jailTime - Date.now()) / 60000);
+        if (content.startsWith('/') || content.startsWith('@')) {
+            return message.reply(`⛔ **In Jail!** Wait ${minsLeft} minutes.`);
+        }
+        return;
+    }
+
+    // --- ADMIN PANEL ---
+    if (authorId === ADMIN_ID) {
+        if (content === '/admenu') return message.reply("**Admin:** /editstatus, @user/edit, @user/id, @user/editid");
         
-        // --- 1. ROBUST MESSAGE EXTRACTION ---
-        let msgType = getContentType(msg.message);
-        let msgContent = msg.message[msgType];
-
-        // Handle ViewOnce
-        if (msgType === 'viewOnceMessage' || msgType === 'viewOnceMessageV2') {
-            msgType = getContentType(msgContent.message);
-            msgContent = msgContent.message[msgType];
+        if (content === '/editstatus') {
+             user.cash += 10000000;
+             saveUser(authorId);
+             return message.reply("Admin: +10,000,000 added.");
+        }
+        
+        if (content.includes('/id') && message.mentions.users.size > 0) {
+            const target = message.mentions.users.first();
+            const tData = getUser(target.id);
+            return message.reply(`🆔 Real ID: \`${tData.id}\``);
         }
 
-        let body = "";
-        let caption = "";
+        if (content.includes('/editid') && message.mentions.users.size > 0) {
+             const target = message.mentions.users.first();
+             const newId = args[args.length - 1];
+             const tData = getUser(target.id);
+             tData.id = newId;
+             saveUser(target.id);
+             return message.reply(`ID changed to ${newId}`);
+        }
+    }
 
-        if (msgContent) {
-            if (msgContent.caption) caption = msgContent.caption;
-            if (msgContent.text) body = msgContent.text;
-            if (msgContent.conversation) body = msgContent.conversation;
+    // --- GENERAL ---
+    if (content === '/menu') return message.reply("📜 **Commands:** /crlps, /crltf, /crlbs, /status, /scantarget, /invest, /scan");
+    
+    if (content === '/status') return message.reply(`👤 **${user.role.toUpperCase()}**\nCash: ${formatMoney(user.cash)}\nID: Hidden\nCases: ${user.casesSolved}`);
+    
+    if (content.startsWith('@') && content.includes('/status')) {
+        const target = message.mentions.users.first();
+        if (!target) return;
+        const tData = getUser(target.id);
+        // Hide Role if Thief
+        let r = tData.role === 'thief' ? 'citizen' : tData.role;
+        return message.reply(`🔎 **Scan:** ${target.username}\nRole: ${r}\nWealth: ${formatMoney(tData.cash)}`);
+    }
+
+    if (content === '/ubank') return message.reply(`🏦 Universal Bank: ${formatMoney(universalBank)}`);
+
+    if (content === '/del' && message.member.permissions.has('ManageMessages')) {
+        message.channel.bulkDelete(5).catch(() => {});
+    }
+
+    // --- ROLE SWITCH ---
+    // (Note: Cool down logic simplified for final code stability)
+    if (content === '/crlps') { user.role = 'police'; saveUser(authorId); message.reply("👮 You are now Police."); }
+    if (content === '/crltf') { user.role = 'thief'; saveUser(authorId); message.reply("🥷 You are now a Thief."); }
+    if (content === '/crlbs') { 
+        if(user.role !== 'businessman') {
+            user.role = 'businessman'; user.cash += 500000; 
+            saveUser(authorId);
+            message.reply("💼 You are a Businessman. Bonus +500k.");
+        }
+    }
+
+    // --- THIEF COMMANDS ---
+    if (user.role === 'thief') {
+        if (content === '/jailtm') return message.reply("You are not in jail.");
+
+        if (content === '/scanps') {
+            if (user.cash < 100) return message.reply("Need $100.");
+            user.cash -= 100;
+            saveUser(authorId);
+            let list = "👮 **Police:**\n";
+            for(const uid in users) {
+                if(users[uid].role === 'police') list += `<@${uid}> (Cases: ${users[uid].casesSolved})\n`;
+            }
+            return message.reply(list);
         }
 
-        const pushName = msg.pushName || "User";
-        const user = getUser(normalizedSender, pushName);
-
-        // --- 2. UPLOAD LOGIC (/up in caption) ---
-        const txtToCheck = (caption || body || "").toLowerCase();
-        
-        if (txtToCheck.includes('/up')) {
-            const isImage = msgType === 'imageMessage';
-            const isVideo = msgType === 'videoMessage';
-
-            if (isImage || isVideo) {
-                if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only!" });
+        if (content === '/scantarget') {
+            if (user.cash < 200) return message.reply("Need $200.");
+            user.cash -= 200;
+            saveUser(authorId);
+            let list = "🎯 **Targets:**\n";
+            let c = 0;
+            for(const [uid, u] of Object.entries(users)) {
+                if(uid === authorId || u.role === 'police') continue;
+                if(c >= 10) break;
                 
-                const userCaption = (caption || body).replace(/\/up/i, '').trim() || "No Caption";
-                if (user.photos.length >= 5) return sock.sendMessage(from, { text: "❌ Gallery Full! Delete with /del [number]." });
-
-                await sock.sendMessage(from, { text: "⏳ Downloading & Uploading..." });
+                let hid = "";
+                if (u.role === 'businessman' && u.bodyguard) hid = u.id.substring(0,2) + "||????||";
+                else if (u.role === 'businessman') hid = u.id.substring(0,3) + "||???||";
+                else hid = u.id.substring(0,2) + "||?||"; // Citizen
                 
-                try {
-                    // MANUAL STREAM DOWNLOAD (Much safer)
-                    const stream = await downloadContentFromMessage(msgContent, isImage ? 'image' : 'video');
-                    const buffer = await streamToBuffer(stream);
+                list += `<@${uid}> (${u.role}) | ${formatMoney(u.cash)} | ID: ${hid}\n`;
+                c++;
+            }
+            return message.reply(list);
+        }
 
-                    const ext = isVideo ? 'mp4' : 'jpg';
-                    const tempPath = `./temp_${Date.now()}.${ext}`;
-                    fs.writeFileSync(tempPath, buffer);
-                    
-                    console.log("📤 Sending to Cloudinary...");
-                    const result = await cloudinary.uploader.upload(tempPath, { resource_type: "auto" });
-                    
-                    user.photos.push({
-                        url: result.secure_url,
-                        caption: userCaption,
-                        type: isVideo ? 'video' : 'image',
-                        likes: []
-                    });
+        // ROB: @User 123456
+        if (message.mentions.users.size > 0 && !content.includes('/')) {
+             const target = message.mentions.users.first();
+             const guess = args[args.length - 1]; // Last word
+             
+             if (!isNaN(guess)) {
+                 if (user.cash < 100) return message.reply("Need $100.");
+                 user.cash -= 100;
 
-                    fs.unlinkSync(tempPath); 
-                    await saveUser(normalizedSender);
-                    return sock.sendMessage(from, { text: `✅ Uploaded #${user.photos.length}!\nType /pf to check.` });
-                } catch (e) {
-                    console.error("UPLOAD ERROR:", e);
-                    return sock.sendMessage(from, { text: "❌ Upload Failed. " + e.message });
+                 const tData = getUser(target.id);
+                 if (tData.role === 'police') return message.reply("Cannot rob Police.");
+
+                 const diff = Math.abs(parseInt(guess) - parseInt(tData.id));
+                 let percent = 0;
+
+                 if (guess === tData.id) percent = 0.10; // Exact
+                 else if (diff < 50) percent = 0.02;     // Close
+                 else if (diff < 100) percent = 0.01;    // Kinda Close
+
+                 if (percent > 0) {
+                     const stolen = Math.floor(tData.cash * percent);
+                     tData.cash -= stolen;
+                     user.cash += stolen;
+                     tData.id = generateID(); // New ID for victim
+                     saveUser(target.id); saveUser(authorId);
+                     return message.reply(`✅ **Robbery Success!** Stole ${formatMoney(stolen)} (${percent*100}%)`);
+                 } else {
+                     saveUser(authorId);
+                     return message.reply("❌ **Failed.** Wrong ID.");
+                 }
+             }
+        }
+    }
+
+    // --- POLICE COMMANDS ---
+    if (user.role === 'police') {
+        if (content === '/scan') {
+            if (user.cash < 200) return message.reply("Need $200.");
+            user.cash -= 200;
+            saveUser(authorId);
+            let list = "🥷 **Thieves:**\n";
+            for(const uid in users) {
+                if(users[uid].role === 'thief') {
+                    const r = Math.floor(users[uid].cash * 0.03);
+                    list += `<@${uid}> | Reward: ${formatMoney(r)} | ID Hint: ${users[uid].id.substring(0,5)}?\n`;
                 }
             }
+            return message.reply(list || "No thieves.");
         }
 
-        // --- 3. COMMAND PARSING ---
-        const fullText = body || caption || "";
-        if (!fullText.startsWith('/') && !fullText.startsWith('@')) return; 
+        if (content.includes('/arrest') && message.mentions.users.size > 0) {
+             const target = message.mentions.users.first();
+             const splitCmd = content.split('arrest');
+             const guess = splitCmd[1] ? splitCmd[1].trim() : "";
+             const tData = getUser(target.id);
 
-        const args = fullText.trim().split(/ +/);
-        let command = args[0].toLowerCase();
+             if (user.cash < 50) return message.reply("Need $50.");
+             user.cash -= 50;
+
+             if (tData.role !== 'thief') return message.reply("Not a thief!");
+
+             // Check last digit
+             if (guess === tData.id.slice(-1)) {
+                 const penalty = Math.floor(tData.cash * 0.80);
+                 const reward = Math.floor(penalty * 0.03);
+                 const toBank = penalty - reward;
+
+                 tData.cash -= penalty;
+                 user.cash += reward;
+                 universalBank += toBank;
+                 user.casesSolved++;
+                 
+                 tData.jailTime = Date.now() + (5 * 60 * 1000); // 5 Mins
+                 tData.id = generateID();
+
+                 saveUser(target.id); saveUser(authorId); saveBank();
+                 return message.reply(`🚔 **ARRESTED!**\nReward: ${formatMoney(reward)}\nThief Jailed.`);
+             } else {
+                 saveUser(authorId);
+                 return message.reply("❌ Wrong digit.");
+             }
+        }
         
-        let mentionedJid = msgContent?.contextInfo?.mentionedJid?.[0];
-        if (fullText.includes('/') && command.includes('@')) {
-            const parts = command.split('/');
-            if (parts.length > 1) command = '/' + parts[1].replace(/\d+/g, ''); 
+        if (content === '/leave') {
+             // Resign logic
+             for(const uid in users) {
+                 if(users[uid].bodyguard === authorId) {
+                     users[uid].bodyguard = null;
+                     saveUser(uid);
+                 }
+             }
+             return message.reply("Resigned from Bodyguard.");
         }
+    }
 
-        // --- COMMANDS ---
-
-        if (command === '/pf' || command === '/mypf') {
-            const targetJid = mentionedJid || normalizedSender;
-            const t = getUser(targetJid);
-            const totalLikes = getTotalLikes(t);
-            const isMe = targetJid === normalizedSender;
-
-            if (!isMe && t.privacy === 'private') return sock.sendMessage(from, { text: `🔒 @${t.name}'s profile is Private.` });
-
-            let status = "";
-            if (t.lover) status += `❤️ Lover: @${t.lover.split('@')[0]} (${formatDuration(t.since)})\n`;
-            else status += `💔 Single\n`;
-            if (t.bestie) status += `💛 Bestie: @${t.bestie.split('@')[0]}\n`;
-            if (t.buddy) status += `💙 Buddy: @${t.buddy.split('@')[0]}\n`;
-
-            let galleryTxt = "";
-            if (t.photos && t.photos.length > 0) {
-                galleryTxt = "\n📸 *Gallery:*\n";
-                t.photos.forEach((p, i) => {
-                    const pLikes = p.likes ? p.likes.length : 0;
-                    galleryTxt += `#${i+1}: ${p.caption} (❤️ ${pLikes})\n`;
-                });
-            } else { galleryTxt = "\n(No Photos Uploaded)"; }
-
-            const txt = `👤 *${t.name}*\n❤️ ${totalLikes} Total Likes\n\n📝 ${t.bio}\n\n${status}${galleryTxt}\n\n*Reply /like to Vote!*`;
-
-            try {
-                if (t.photos && t.photos.length > 0) {
-                    const main = t.photos[0];
-                    const msgContent = main.type === 'video' 
-                        ? { video: { url: main.url }, caption: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) }
-                        : { image: { url: main.url }, caption: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) };
-                    await sock.sendMessage(from, msgContent, { quoted: msg });
-                } else {
-                    await sock.sendMessage(from, { text: txt, mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) }, { quoted: msg });
-                }
-            } catch (e) {
-                console.error("SEND PROFILE ERROR:", e);
-                await sock.sendMessage(from, { text: txt + "\n(Image failed to load)", mentions: [t.lover, t.bestie, t.buddy].filter(Boolean) });
-            }
-        }
-
-        if (command === '/bio') {
-            if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only." });
-            const newBio = fullText.replace('/bio', '').trim();
-            if (!newBio) return sock.sendMessage(from, { text: "❌ Usage: /bio Text" });
-            user.bio = newBio;
-            await saveUser(normalizedSender);
-            await sock.sendMessage(from, { text: "✅ Bio Updated!" });
-        }
-
-        if (command.startsWith('/del')) {
-            if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only." });
-            let index = parseInt(fullText.replace(/\D/g, ''));
-            if (!index || index < 1 || index > user.photos.length) return sock.sendMessage(from, { text: `❌ Usage: /del 1` });
-            user.photos.splice(index - 1, 1);
-            await saveUser(normalizedSender);
-            await sock.sendMessage(from, { text: `🗑️ Deleted #${index}` });
-        }
-
-        if (command === '/like') {
-            let photoIndex = 1;
-            const parts = fullText.split(' ');
-            if (parts[1] && !isNaN(parts[1])) photoIndex = parseInt(parts[1]);
-
-            let targetJid = mentionedJid;
-            if (!targetJid) {
-                const quotedPart = msgContent?.contextInfo?.participant;
-                if (quotedPart) targetJid = quotedPart;
-            }
-
-            if (!targetJid) return sock.sendMessage(from, { text: "❌ Reply to user or mention: /like @user" });
-            if (targetJid === normalizedSender) return sock.sendMessage(from, { text: "❌ No self-likes." });
-
-            const t = getUser(targetJid);
-            if (!t.photos || t.photos.length === 0) return sock.sendMessage(from, { text: "❌ No photos." });
-            if (photoIndex < 1 || photoIndex > t.photos.length) return sock.sendMessage(from, { text: "❌ Invalid photo #." });
-
-            const photo = t.photos[photoIndex - 1];
-            if (!photo.likes) photo.likes = [];
-            if (photo.likes.includes(normalizedSender)) return sock.sendMessage(from, { text: "❌ Already liked!" });
-
-            photo.likes.push(normalizedSender);
-            await saveUser(targetJid);
-            return sock.sendMessage(from, { text: `❤️ Liked Photo #${photoIndex} of @${t.name}!` });
-        }
-
-        if (command === '/top') {
-            const sorted = Object.values(localUsers)
-                .map(u => ({ name: u.name, likes: getTotalLikes(u) }))
-                .sort((a,b) => b.likes - a.likes)
-                .slice(0, 50);
-            let out = "🔥 *TOP 50 STARS*\n";
-            sorted.forEach((u, i) => out += `${i+1}. ${u.name} - ❤️ ${u.likes}\n`);
-            await sock.sendMessage(from, { text: out });
-        }
-
-        if (command === '/public') { user.privacy = 'public'; await saveUser(normalizedSender); await sock.sendMessage(from, { text: "✅ Public" }); }
-        if (command === '/private') { user.privacy = 'private'; await saveUser(normalizedSender); await sock.sendMessage(from, { text: "🔒 Private" }); }
-
-        if (['/propose', '/invbs', '/invbd', '/accept', '/decline', '/end'].includes(command)) {
-            if (isGroup) return sock.sendMessage(from, { text: "❌ DM Only." });
+    // --- BUSINESSMAN COMMANDS ---
+    if (user.role === 'businessman') {
+        if (content.startsWith('/invest') && !content.includes('st')) {
+            const amount = parseInt(args[1]);
+            if (!amount || amount > user.cash) return message.reply("Invalid amount.");
             
-            if (['/propose', '/invbs', '/invbd'].includes(command)) {
-                if (command === '/propose' && user.lover) return sock.sendMessage(from, { text: "❌ Taken." });
-                let type = command === '/propose' ? 'lover' : (command === '/invbs' ? 'bestie' : 'buddy');
-                user.pendingAction = type; 
-                await saveUser(normalizedSender);
-                await sock.sendMessage(from, { text: `📱 Type their **Phone Number** (e.g. 919876543210).` });
-            }
-
-            if (command === '/accept' && user.pendingReq) {
-                const req = user.pendingReq;
-                const rUser = getUser(req.from);
-                if (req.type === 'lover' && (user.lover || rUser.lover)) { user.pendingReq = null; await saveUser(normalizedSender); return sock.sendMessage(from, { text: "❌ Taken." }); }
-                const now = Date.now();
-                if (req.type === 'lover') { user.lover = req.from; user.since = now; rUser.lover = normalizedSender; rUser.since = now; }
-                else if (req.type === 'bestie') { user.bestie = req.from; rUser.bestie = normalizedSender; }
-                else if (req.type === 'buddy') { user.buddy = req.from; rUser.buddy = normalizedSender; }
-                user.pendingReq = null;
-                await saveUser(normalizedSender); await saveUser(req.from);
-                await sock.sendMessage(from, { text: "✅ Connected!" });
-                await sock.sendMessage(req.from, { text: `✅ @${user.name} accepted!`, mentions: [normalizedSender] });
-            }
-
-            if (command === '/decline' && user.pendingReq) {
-                const f = user.pendingReq.from; user.pendingReq = null; await saveUser(normalizedSender);
-                await sock.sendMessage(from, { text: "❌ Declined." });
-                await sock.sendMessage(f, { text: "❌ Request Declined." });
-            }
-
-            if (command === '/end') {
-                if (!args[1]) return sock.sendMessage(from, { text: "💔 Usage: /end 1 (Lover), /end 2 (Bestie), /end 3 (Buddy)" });
-                let tJid = null, type = "";
-                if (args[1] === '1') { tJid = user.lover; type = 'lover'; user.lover = null; }
-                if (args[1] === '2') { tJid = user.bestie; type = 'bestie'; user.bestie = null; }
-                if (args[1] === '3') { tJid = user.buddy; type = 'buddy'; user.buddy = null; }
-                if (tJid) {
-                    const t = getUser(tJid);
-                    if (type === 'lover') t.lover = null;
-                    if (type === 'bestie') t.bestie = null;
-                    if (type === 'buddy') t.buddy = null;
-                    await saveUser(normalizedSender); await saveUser(tJid);
-                    await sock.sendMessage(from, { text: "✅ Ended." });
-                    await sock.sendMessage(tJid, { text: `💔 Broken up by @${user.name}`, mentions: [normalizedSender] });
-                }
-            }
+            user.cash -= amount;
+            activeInvestments.push({ userId: authorId, amount: amount, endTime: Date.now() + 1800000 }); // 30 mins
+            saveUser(authorId);
+            return message.reply(`📉 Invested ${formatMoney(amount)}. Return in 30 mins.`);
         }
 
-        if (user.pendingAction && /^\d{10,15}$/.test(fullText.replace(/\D/g, ''))) {
-            const targetNum = fullText.replace(/\D/g, '');
-            const targetJid = targetNum + "@s.whatsapp.net";
-            if (targetJid === normalizedSender) return sock.sendMessage(from, { text: "❌ Cannot choose yourself." });
-            const target = getUser(targetJid, "Unknown");
-            target.pendingReq = { from: normalizedSender, type: user.pendingAction };
-            user.pendingAction = null; 
-            await saveUser(normalizedSender); await saveUser(targetJid);
-            await sock.sendMessage(from, { text: "✅ Request Sent!" });
-            await sock.sendMessage(targetJid, { text: `💌 *REQUEST*\n\n@${user.name} wants to connect.\nReply */accept* or */decline*`, mentions: [normalizedSender] });
+        if (content === '/investst') {
+            const my = activeInvestments.filter(i => i.userId === authorId).length;
+            return message.reply(`Active Investments: ${my}`);
         }
-    });
-}
-keepAlive();
-startBot();
-process.on('uncaughtException', (err) => console.error(err));
-process.on('unhandledRejection', (err) => console.error(err));
+
+        if (content === '/investpst') {
+            const hist = user.investmentHistory.slice(-5).join('\n');
+            return message.reply(`**History:**\n${hist || "None"}`);
+        }
+
+        if (content.includes('/hire') && message.mentions.users.size > 0) {
+            const target = message.mentions.users.first();
+            const tData = getUser(target.id);
+            if (tData.role !== 'police') return message.reply("Must hire Police.");
+            
+            user.bodyguard = target.id;
+            tData.bodyguard = authorId;
+            saveUser(authorId); saveUser(target.id);
+            return message.reply(`🤝 Hired ${target.username}.`);
+        }
+
+        if (content === '/fire') {
+            user.bodyguard = null;
+            saveUser(authorId);
+            return message.reply("Fired bodyguard.");
+        }
+
+        if (content.startsWith('/loan')) {
+             const amount = parseInt(args[1]);
+             if(!amount) return message.reply("/loan [amount]");
+             
+             // Send DM to Admin
+             client.users.fetch(ADMIN_ID).then(admin => {
+                 admin.send(`**LOAN REQUEST**\nFrom: ${message.author.username}\nAmount: ${formatMoney(amount)}`);
+             });
+             return message.reply("Loan request sent to Admin.");
+        }
+    }
+
+    // --- LEADERBOARDS ---
+    if (content === '/toppolice') {
+        const sorted = Object.entries(users).filter(([,u]) => u.role==='police').sort(([,a],[,b])=>b.casesSolved-a.casesSolved).slice(0,10);
+        let msg = "**Top Police:**\n" + sorted.map(([,u],i)=> `${i+1}. ${u.casesSolved} Cases`).join('\n');
+        return message.reply(msg);
+    }
+
+    if (content === '/richestman') {
+        const sorted = Object.entries(users).sort(([,a],[,b])=>b.cash-a.cash).slice(0,10);
+        let msg = "**Richest:**\n" + sorted.map(([,u],i)=> `${i+1}. ${formatMoney(u.cash)} (${u.role})`).join('\n');
+        return message.reply(msg);
+    }
+});
+
+client.login(TOKEN);
+// --- KEEP ALIVE FOR RENDER ---
+const http = require('http');
+http.createServer((req, res) => {
+  res.write("I'm alive");
+  res.end();
+}).listen(8080);
