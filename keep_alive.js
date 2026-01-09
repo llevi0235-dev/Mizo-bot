@@ -5,7 +5,7 @@ const port = process.env.PORT || 8000;
 
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WhatsApp Bot & Firebase Database Running! 🚀');
+    res.end('Sector 7 Bot & Firebase Database Running! 🚀'); // Changed text
 });
 
 function keepAlive() {
