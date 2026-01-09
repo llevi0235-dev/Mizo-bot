@@ -1,6 +1,7 @@
 const { ref, update, get, set } = require('firebase/database');
 const Config = require('./config');
 const UM = require('./userManager');
+const Reporter = require('./reporter'); // 👈 IMPORT THE NEW FILE
 
 module.exports = (client) => {
     client.on('messageCreate', async (message) => {
@@ -43,7 +44,7 @@ module.exports = (client) => {
             }
         }
 
-        // --- ROBBER (New Math + Instant ID Change) ---
+        // --- ROBBER ---
         if (user.role === 'robber') {
             if (content === '/scantarget') {
                 if(user.cash < 200) return message.reply("Need $200 to scan.");
@@ -58,26 +59,18 @@ module.exports = (client) => {
                 const guess = m[1];
                 const allUsers = await UM.getAllUsers();
                 let target = null, targetId = null;
-                let bestMatchLevel = 0; // 0=None, 1=1Digit, 2=2Digits, 3=Exact
+                let bestMatchLevel = 0; 
 
-                // 1. Find Best Match
                 for (const [uid, u] of Object.entries(allUsers)) {
                     if (u.role !== 'citizen' && u.role !== 'businessman') continue;
                     if (uid === userId) continue;
-                    
                     const idStr = String(u.special_id);
                     const guessStr = String(guess);
-                    
                     let matchLevel = 0;
                     if (idStr === guessStr) matchLevel = 3;
                     else if (idStr.endsWith(guessStr.slice(-2)) && guessStr.length >= 2) matchLevel = 2;
                     else if (idStr.endsWith(guessStr.slice(-1))) matchLevel = 1;
-
-                    if (matchLevel > bestMatchLevel) {
-                        bestMatchLevel = matchLevel;
-                        target = u;
-                        targetId = uid;
-                    }
+                    if (matchLevel > bestMatchLevel) { bestMatchLevel = matchLevel; target = u; targetId = uid; }
                 }
 
                 if (!target) return message.reply("No targets found matching that number.");
@@ -86,27 +79,22 @@ module.exports = (client) => {
                 
                 await update(ref(UM.db, `users/${userId}`), { cash: user.cash - 100 });
                 
-                // 2. Calculate Payout
                 let pct = 0;
                 let isExact = false;
-
-                if (bestMatchLevel === 3) { pct = 0.15; isExact = true; } // Exact: 15% + New ID
-                else if (bestMatchLevel === 2) { pct = 0.04; }           // 2 Digits: 4%
-                else if (bestMatchLevel === 1) { pct = 0.01; }           // 1 Digit: 1%
+                if (bestMatchLevel === 3) { pct = 0.15; isExact = true; } 
+                else if (bestMatchLevel === 2) { pct = 0.04; }           
+                else if (bestMatchLevel === 1) { pct = 0.01; }           
                 
                 if (pct > 0) {
                     const stolen = Math.floor(target.cash * pct);
-                    
-                    // Update Victim (Give NEW ID only if Exact Match)
                     const updates = { cash: target.cash - stolen };
-                    if (isExact) updates.special_id = UM.getNewID(target.role); // 👈 INSTANT ID CHANGE
+                    if (isExact) updates.special_id = UM.getNewID(target.role); 
                     await update(ref(UM.db, `users/${targetId}`), updates);
-
-                    // Update Robber
                     await update(ref(UM.db, `users/${userId}`), { cash: user.cash + stolen, total_stolen: (user.total_stolen||0)+stolen, [`robbery_history/${targetId}`]: true });
                     
-                    client.channels.cache.get(Config.CHANNELS.CRIME_FEEDS)?.send(`🚨 **ROBBERY!** ${user.username} robbed ${target.username} for ${UM.fmt(stolen)}! (${isExact ? "EXACT MATCH!" : "Partial Match"})`);
-                    client.channels.cache.get(Config.CHANNELS.SECTOR7_NEWS)?.send(UM.generateNews('robbery', user.username, target.username, UM.fmt(stolen)));
+                    // 👇 NEW CLEANER LOGS 👇
+                    await Reporter.logRobbery(client, user, target, stolen, isExact);
+                    await Reporter.postNews(client, 'robbery', user.username, target.username, UM.fmt(stolen));
                     
                     return message.reply(`✅ **SUCCESS!**\nMatched: ${isExact ? "EXACT ID (New ID generated)" : (bestMatchLevel + " Digit(s)")}.\nStolen: ${UM.fmt(stolen)}.`);
                 } else {
@@ -149,8 +137,9 @@ module.exports = (client) => {
                 await update(ref(UM.db, `users/${targetId}`), { cash: targetData.cash - seized, role: 'prisoner', release_time: Date.now() + 600000, special_id: null });
                 await update(ref(UM.db, `users/${userId}`), { cash: user.cash + reward, cases: (user.cases||0)+1 });
 
-                client.channels.cache.get(Config.CHANNELS.RECORD_ROOM)?.send(`📋 **POLICE RECORD**\nOfficer **${user.username}** arrested **${targetData.username}**.`);
-                client.channels.cache.get(Config.CHANNELS.SECTOR7_NEWS)?.send(UM.generateNews('arrest', user.username, targetData.username, null));
+                // 👇 NEW CLEANER LOGS 👇
+                await Reporter.logArrest(client, user, targetData, guess);
+                await Reporter.postNews(client, 'arrest', user.username, targetData.username, null);
                 
                 return message.reply(`✅ Arrested! Reward: ${UM.fmt(reward)}`);
             }
