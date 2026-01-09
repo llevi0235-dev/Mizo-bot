@@ -51,7 +51,9 @@ const policeRanks = [
 setInterval(async () => {
     const users = await UM.getAllUsers();
     const now = Date.now();
-    const guild = client.guilds.cache.first(); // Get server for role updates
+    
+    // Use the ID from Config to be safe, or .first() if you prefer
+    const guild = client.guilds.cache.get(Config.GUILD_ID) || client.guilds.cache.first();
 
     // Define Police Ranks
     const policeRanks = [
@@ -73,10 +75,11 @@ setInterval(async () => {
         
         // --- A. POLICE LOGIC (Ranks & Promotions) ---
         if (user.role === 'police') {
-            const cases = user.cases_solved || 0;
+            // Note: DB usually uses 'cases', check if you changed it to 'cases_solved'
+            const cases = user.cases || 0; 
             
             // Find highest rank they qualify for
-            const rank = [...policeRanks].reverse().find(r => cases >= r.min);
+            const rank = [...policeRanks].reverse().find(r => cases >= r.min) || policeRanks[0];
             amount = rank.pay;
 
             // Check timing
@@ -106,17 +109,21 @@ setInterval(async () => {
 
                             // C. ANNOUNCE PROMOTION (Only if it's not the starting rank 'Officer')
                             if (cases > 0) {
-                                // 1. Official Log (Short & Serious) -> To Police Channel
+                                // 1. Official Log (Short & Serious)
                                 client.channels.cache.get(Config.CHANNELS.POLICE_PROMOTIONS)?.send(
                                     `📢 **DEPARTMENT ANNOUNCEMENT**\n\n**${user.username}** has been promoted to **${rank.name}**.\n💰 **New Salary:** ${UM.fmt(amount)}\n\n*Authority granted. Respect the badge.*`
                                 );
 
-                                // 2. Public News Story (Long & Story-like) -> To Sector 7 News
+                                // 2. Public News Story (Long & Story-like)
                                 const news = UM.generateNews('promotion', user.username, null, rank.name);
                                 client.channels.cache.get(Config.CHANNELS.SECTOR7_NEWS)?.send(news);
                             }
+                        }
+                    }
+                } 
+                // 👆 THIS BRACKET WAS MISSING! It closes 'if (guild)'
 
-                // 3. Send Paycheck DM
+                // 3. Send Paycheck DM (Now this runs every time they get paid!)
                 const nextRank = policeRanks.find(r => r.min > cases);
                 const nextGoal = nextRank 
                     ? `**${nextRank.name}** at ${nextRank.min} Cases (${nextRank.min - cases} more)` 
@@ -124,7 +131,7 @@ setInterval(async () => {
 
                 const embed = new EmbedBuilder()
                     .setTitle(`👮 Payday: ${UM.fmt(amount)}`)
-                    .setColor(0x00FF00) // Green
+                    .setColor(0x00FF00) 
                     .setDescription(`Good work, **${rank.name}**! Your payment for maintaining order in Sector 7 has been deposited.\n\n📈 **Next Promotion:** ${nextGoal}`)
                     .setTimestamp();
                 
