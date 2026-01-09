@@ -523,30 +523,33 @@ client.channels.cache.get(Config.CHANNELS.SECTOR7_NEWS)?.send(news);
 });
 
 client.once('ready', () => { console.log("Sector 7 Online"); setupImmigration(); updateLeaderboards(); });
-// --- INTERACTION HANDLER (Buttons) ---
+
 client.on('interactionCreate', async interaction => {
+    // 1. Safety Check: If it's not a button, ignore it.
     if (!interaction.isButton()) return;
 
+    // 2. Handle the "GET ID CARD" button
     if (interaction.customId === 'create_ticket') {
-        // 1. Tell Discord we heard the click (removes "Interaction Failed" error)
+        
+        // Tell Discord we heard the click (Stop "Interaction Failed" error)
         await interaction.deferReply({ ephemeral: true });
 
-        // 2. Check if they already have a ticket
+        // Check if user already has a ticket
         const existingChannel = interaction.guild.channels.cache.find(c => c.name === `ticket-${interaction.user.username.toLowerCase()}`);
         if (existingChannel) {
             return interaction.editReply(`❌ You already have a ticket open: ${existingChannel}`);
         }
 
-        // 3. Create the Private Ticket Channel
+        // Create the Private Ticket Channel
         try {
             const ticketChannel = await interaction.guild.channels.create({
                 name: `ticket-${interaction.user.username}`,
                 type: ChannelType.GuildText,
-                parent: Config.CHANNELS.IMMIGRATION_CATEGORY,
+                parent: Config.CHANNELS.IMMIGRATION_CATEGORY, // Make sure this ID is correct in config.js!
                 permissionOverwrites: [
                     {
                         id: interaction.guild.id,
-                        deny: [PermissionsBitField.Flags.ViewChannel], // Hide from everyone
+                        deny: [PermissionsBitField.Flags.ViewChannel], // Hide from public
                     },
                     {
                         id: interaction.user.id,
@@ -559,7 +562,7 @@ client.on('interactionCreate', async interaction => {
                 ]
             });
 
-            // 4. Send Welcome Message inside the new ticket
+            // Send Welcome Message inside the new ticket
             const embed = new EmbedBuilder()
                 .setTitle("🪪 Immigration Office")
                 .setDescription(`Welcome, <@${interaction.user.id}>.\n\nTo begin your life in Sector 7, we need to register your identity.\n\n**Please type your Character Name below.**\n*(Example: John Doe)*`)
@@ -567,14 +570,15 @@ client.on('interactionCreate', async interaction => {
 
             await ticketChannel.send({ embeds: [embed] });
 
-            // 5. Confirm to the user the button worked
+            // Success message
             await interaction.editReply(`✅ Immigration Ticket Created: ${ticketChannel}`);
 
         } catch (error) {
-            console.error(error);
-            await interaction.editReply("❌ Error creating ticket. Please check Bot Permissions.");
+            console.error("Ticket Error:", error);
+            await interaction.editReply("❌ Error creating ticket. Check Bot Permissions or Category ID.");
         }
     }
 });
+
 
 client.login(Config.DISCORD_TOKEN);
