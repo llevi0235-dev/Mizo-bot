@@ -2,8 +2,6 @@ require('dotenv').config();
 
 module.exports = {
     // --- SECRETS ---
-    // If you are using a .env file, keep these as process.env.
-    // If you are not using .env, paste your actual strings inside the quotes.
     DISCORD_TOKEN: process.env.DISCORD_TOKEN, 
     ADMIN_ID: "1373539575829368963",
     
@@ -20,17 +18,12 @@ module.exports = {
 
     // --- CHANNEL IDS ---
     CHANNELS: {
-        // Immigration (New Ticket System)
         IMMIGRATION_CATEGORY: '1458861484632182879', 
         GET_ID_CARD: '1458862119532364013',
-
-        // Leaderboards
-        LEADERBOARD_MAIN: '1458852649544843274', // Shows Top Officers AND Richest
+        LEADERBOARD_MAIN: '1458852649544843274',
         TOP_OFFICERS: '1458851589686300736',
         LOOT_LEADERBOARD: '1458853409179304046',
         TOP_INVESTORS: '1458853822314053724',
-
-        // Game Channels
         CRIME_FEEDS: '1458855691271012480',
         POLICE_RECORDS: '1458856052656443484',
         PRISON_JAIL: '1458858485750960233',
