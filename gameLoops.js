@@ -25,7 +25,6 @@ module.exports = (client) => {
                 if (now - user.last_income >= interval) {
                     await update(ref(UM.db, `users/${userId}`), { cash: user.cash + amount, last_income: now });
                     
-                    // Rank Sync
                     if (guild) {
                         const member = await guild.members.fetch(userId).catch(() => null);
                         if (member) {
@@ -44,14 +43,12 @@ module.exports = (client) => {
                             }
                         }
                     }
-                    // DM
                     const embed = new EmbedBuilder().setTitle(`👮 Payday: ${UM.fmt(amount)}`).setDescription(`Rank: **${rank.name}**`).setColor(0x00FF00);
                     client.users.send(userId, { embeds: [embed] }).catch(() => null);
                 }
                 continue;
             }
 
-            // Other Roles
             if (user.role === 'citizen') amount = 400;
             if (user.role === 'businessman') amount = 1000;
             if (user.role === 'robber') { interval = 20 * 60 * 1000; amount = 50; }
@@ -62,26 +59,40 @@ module.exports = (client) => {
         }
     }, 60000);
 
-    // 2. JAIL & LEADERBOARD (Simplified for space)
+    // 🛑 2. JAIL RELEASE LOOP (CRITICAL FIX)
     setInterval(async () => {
         const users = await UM.getAllUsers();
         const now = Date.now();
         const guild = client.guilds.cache.get(Config.GUILD_ID);
 
         for (const [userId, user] of Object.entries(users)) {
+            // Check if user is prisoner AND time is up
             if (user.role === 'prisoner' && user.release_time && now >= user.release_time) {
-                await update(ref(UM.db, `users/${userId}`), { role: 'robber', release_time: null, special_id: UM.getNewID('robber') });
+                
+                // 1. GENERATE NEW ID FOR ROBBER
+                const newID = UM.getNewID('robber');
+
+                // 2. UPDATE DB (Revert Role + New ID)
+                await update(ref(UM.db, `users/${userId}`), { 
+                    role: 'robber', 
+                    release_time: null, 
+                    special_id: newID 
+                });
+
+                // 3. UPDATE DISCORD ROLES
                 if (guild) {
                     const member = await guild.members.fetch(userId).catch(() => null);
                     if(member) {
                         const pris = guild.roles.cache.find(r => r.name === 'Prisoner');
                         const rob = guild.roles.cache.find(r => r.name === 'Robber');
-                        if(pris) member.roles.remove(pris);
-                        if(rob) member.roles.add(rob);
+                        if(pris) await member.roles.remove(pris).catch(()=>{});
+                        if(rob) await member.roles.add(rob).catch(()=>{});
                     }
                 }
-                client.channels.cache.get(Config.CHANNELS.PRISON_JAIL)?.send(`🔓 <@${userId}> released.`);
+                
+                // 4. LOG RELEASE
+                client.channels.cache.get(Config.CHANNELS.PRISON_JAIL)?.send(`🔓 **${user.username}** has served their time and is released.\n🆔 **New ID Assigned.**`);
             }
         }
-    }, 60000);
+    }, 60000); // Checks every minute
 };

@@ -1,7 +1,7 @@
 const { ref, update, get, set } = require('firebase/database');
 const Config = require('./config');
 const UM = require('./userManager');
-const Reporter = require('./reporter'); // 👈 IMPORT THE NEW FILE
+const Reporter = require('./reporter');
 
 module.exports = (client) => {
     client.on('messageCreate', async (message) => {
@@ -16,6 +16,12 @@ module.exports = (client) => {
             await UM.syncUser(userId, message.author.username);
             user = await UM.getUser(userId);
             if (!user) return message.reply(`Get ID first: <#${Config.CHANNELS.GET_ID_CARD}>`);
+        }
+
+        // 🛑 CRITICAL FIX: BLOCK PRISONERS 🛑
+        if (user.role === 'prisoner') {
+            const releaseSecs = Math.floor(user.release_time / 1000);
+            return message.reply(`🔒 **YOU ARE IN JAIL!**\nYou cannot use commands until release.\nTime remaining: <t:${releaseSecs}:R>`);
         }
 
         // --- GLOBAL COMMANDS ---
@@ -92,7 +98,6 @@ module.exports = (client) => {
                     await update(ref(UM.db, `users/${targetId}`), updates);
                     await update(ref(UM.db, `users/${userId}`), { cash: user.cash + stolen, total_stolen: (user.total_stolen||0)+stolen, [`robbery_history/${targetId}`]: true });
                     
-                    // 👇 NEW CLEANER LOGS 👇
                     await Reporter.logRobbery(client, user, target, stolen, isExact);
                     await Reporter.postNews(client, 'robbery', user.username, target.username, UM.fmt(stolen));
                     
@@ -134,13 +139,22 @@ module.exports = (client) => {
                     }
                 }
 
-                await update(ref(UM.db, `users/${targetId}`), { cash: targetData.cash - seized, role: 'prisoner', release_time: Date.now() + 600000, special_id: null });
+                // 🛑 SET RELEASE TIME (10 MINS)
+                const releaseTime = Date.now() + (10 * 60 * 1000); 
+                
+                await update(ref(UM.db, `users/${targetId}`), { cash: targetData.cash - seized, role: 'prisoner', release_time: releaseTime, special_id: null });
                 await update(ref(UM.db, `users/${userId}`), { cash: user.cash + reward, cases: (user.cases||0)+1 });
 
-                // 👇 NEW CLEANER LOGS 👇
                 await Reporter.logArrest(client, user, targetData, guess);
                 await Reporter.postNews(client, 'arrest', user.username, targetData.username, null);
                 
+                // 🛑 SEND REAL-TIME TIMER TO JAIL CHANNEL
+                const jailChannel = client.channels.cache.get(Config.CHANNELS.PRISON_JAIL);
+                if (jailChannel) {
+                    // <t:TIMESTAMP:R> creates a "In 10 minutes" countdown automatically
+                    jailChannel.send(`🔒 **${targetData.username}** has been jailed by **${user.username}**.\n**Release:** <t:${Math.floor(releaseTime/1000)}:R>`);
+                }
+
                 return message.reply(`✅ Arrested! Reward: ${UM.fmt(reward)}`);
             }
         }
