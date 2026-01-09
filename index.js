@@ -33,21 +33,113 @@ async function setupImmigration() {
         await channel.send({ embeds: [embed], components: [row] });
     }
 }
+// --- CONFIG DATA ---
+const policeRanks = [
+    { name: 'Officer', min: 0, salary: 450 },
+    { name: 'Senior Officer', min: 2, salary: 550 },
+    { name: 'Lead Officer', min: 5, salary: 700 },
+    { name: 'Sergeant', min: 10, salary: 900 },
+    { name: 'Inspector', min: 20, salary: 1200 },
+    { name: 'Chief Inspector', min: 40, salary: 1600 },
+    { name: 'Commander', min: 70, salary: 2200 },
+    { name: 'Commissioner', min: 110, salary: 3000 }
+];
 
 // --- GAME LOOPS ---
 
-// 1. Income Loop
+// 1. Income Loop (Smart Paycheck, Roles & Promotions)
 setInterval(async () => {
     const users = await UM.getAllUsers();
     const now = Date.now();
+    const guild = client.guilds.cache.first(); // Get server for role updates
+
+    // Define Police Ranks
+    const policeRanks = [
+        { name: 'Officer',          min: 0,   pay: 450 },
+        { name: 'Senior Officer',   min: 2,   pay: 550 },
+        { name: 'Lead Officer',     min: 5,   pay: 700 },
+        { name: 'Sergeant',         min: 10,  pay: 900 },
+        { name: 'Inspector',        min: 20,  pay: 1200 },
+        { name: 'Chief Inspector',  min: 40,  pay: 1600 },
+        { name: 'Commander',        min: 70,  pay: 2200 },
+        { name: 'Commissioner',     min: 110, pay: 3000 }
+    ];
+
     for (const [userId, user] of Object.entries(users)) {
         if (user.role === 'prisoner') continue;
-        let interval = 30 * 60 * 1000;
+
+        let interval = 30 * 60 * 1000; // 30 mins default
         let amount = 0;
+        
+        // --- A. POLICE LOGIC (Ranks & Promotions) ---
+        if (user.role === 'police') {
+            const cases = user.cases_solved || 0;
+            
+            // Find highest rank they qualify for
+            const rank = [...policeRanks].reverse().find(r => cases >= r.min);
+            amount = rank.pay;
+
+            // Check timing
+            if (now - user.last_income >= interval) {
+                // 1. Update Database
+                await update(ref(UM.db, `users/${userId}`), { cash: user.cash + amount, last_income: now });
+
+                // 2. Discord Role Sync & Promotion Announcement
+                if (guild) {
+                    const member = await guild.members.fetch(userId).catch(() => null);
+                    if (member) {
+                        const newRole = guild.roles.cache.find(r => r.name === rank.name);
+                        
+                        // If they don't have this role yet, they are being PROMOTED (or assigned for first time)
+                        if (newRole && !member.roles.cache.has(newRole.id)) {
+                            
+                            // A. Remove old rank roles
+                            for (const rData of policeRanks) {
+                                const oldRole = guild.roles.cache.find(r => r.name === rData.name);
+                                if (oldRole && member.roles.cache.has(oldRole.id)) {
+                                    await member.roles.remove(oldRole).catch(()=>{});
+                                }
+                            }
+                            
+                            // B. Add new role
+                            await member.roles.add(newRole).catch(e => console.log(`Role Error: Bot rank too low to give ${rank.name}`));
+
+                            // C. ANNOUNCE PROMOTION (Only if it's not the starting rank 'Officer')
+                            if (cases > 0) {
+                                // 1. Official Log (Short & Serious) -> To Police Channel
+                                client.channels.cache.get(Config.CHANNELS.POLICE_PROMOTIONS)?.send(
+                                    `📢 **DEPARTMENT ANNOUNCEMENT**\n\n**${user.username}** has been promoted to **${rank.name}**.\n💰 **New Salary:** ${UM.fmt(amount)}\n\n*Authority granted. Respect the badge.*`
+                                );
+
+                                // 2. Public News Story (Long & Story-like) -> To Sector 7 News
+                                const news = UM.generateNews('promotion', user.username, null, rank.name);
+                                client.channels.cache.get(Config.CHANNELS.SECTOR7_NEWS)?.send(news);
+                            }
+
+                // 3. Send Paycheck DM
+                const nextRank = policeRanks.find(r => r.min > cases);
+                const nextGoal = nextRank 
+                    ? `**${nextRank.name}** at ${nextRank.min} Cases (${nextRank.min - cases} more)` 
+                    : "**MAX RANK REACHED** 👑";
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`👮 Payday: ${UM.fmt(amount)}`)
+                    .setColor(0x00FF00) // Green
+                    .setDescription(`Good work, **${rank.name}**! Your payment for maintaining order in Sector 7 has been deposited.\n\n📈 **Next Promotion:** ${nextGoal}`)
+                    .setTimestamp();
+                
+                client.users.send(userId, { embeds: [embed] }).catch(() => null);
+            }
+            continue; // Skip the rest of the loop for police
+        }
+
+        // --- B. OTHER ROLES LOGIC ---
         if (user.role === 'citizen') amount = 400;
-        if (user.role === 'police') amount = 450;
         if (user.role === 'businessman') amount = 1000;
-        if (user.role === 'robber') { interval = 20 * 60 * 1000; amount = 50; }
+        if (user.role === 'robber') { 
+            interval = 20 * 60 * 1000; 
+            amount = 50; 
+        }
 
         if (now - user.last_income >= interval) {
             await update(ref(UM.db, `users/${userId}`), { cash: user.cash + amount, last_income: now });
@@ -237,8 +329,9 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed] });
     }
 
-    if (content === '/bl') return message.reply(`💳 **${user.username}** | ${UM.fmt(user.cash)} | ID: ${user.special_id}`);
-
+    if (content === '/bl') {
+        return message.reply(`💳 **${user.username}** | ${UM.fmt(user.cash)} | ID: ${UM.maskID(user.special_id, user.role)}`);
+    }
     // --- BUSINESSMAN ---
     if (user.role === 'businessman') {
         if (content.startsWith('/invest ')) {
@@ -317,7 +410,11 @@ client.on('messageCreate', async (message) => {
                 await update(ref(UM.db, `users/${targetId}`), { cash: target.cash - stolen, special_id: UM.getNewID(target.role) });
                 await update(ref(UM.db, `users/${userId}`), { cash: user.cash + stolen, total_stolen: (user.total_stolen||0)+stolen, [`robbery_history/${targetId}`]: true });
                 
-                client.channels.cache.get(Config.CHANNELS.CRIME_FEEDS)?.send(`🚨 **ROBBERY!** ${user.username} robbed ${target.username} for ${UM.fmt(stolen)}!`);
+                client.channels.cache.get(Config.CHANNELS.CRIME_FEEDS)?.send(`🚨 **ROBBERY!** ${user.username} (${UM.maskID(user.special_id, user.role)}) robbed ${target.username} for ${UM.fmt(stolen)}!`);
+                
+                const news = UM.generateNews('robbery', user.username, target.username, UM.fmt(stolen));
+client.channels.cache.get(Config.CHANNELS.SECTOR7_NEWS)?.send(news);
+
                 return message.reply(`✅ Success! Stole ${UM.fmt(stolen)} (${pct*100}%) from ${target.username}.`);
             } else {
                 await update(ref(UM.db, `users/${userId}`), { [`robbery_cooldowns/${targetId}`]: Date.now() });
@@ -352,7 +449,7 @@ client.on('messageCreate', async (message) => {
             const seized = Math.floor(targetData.cash * 0.80);
             const reward = Math.floor(seized * 0.03);
             
-            // Jail Logic (Database + Discord Role)
+                        // Jail Logic (Database + Discord Role)
             const guild = client.guilds.cache.first();
             if (guild) {
                 const member = await guild.members.fetch(targetId).catch(()=>null);
@@ -364,11 +461,11 @@ client.on('messageCreate', async (message) => {
                 }
             }
 
-            // Set release time (10 mins)
-            const releaseTime = Date.now() + (10 * 60 * 1000); 
-            // Timestamps for display: <t:TIMESTAMP:R>
-            const discordTime = Math.floor(releaseTime / 1000);
+            // 1. ADD RECORD TO DATABASE
+            await UM.addJailRecord(targetId, user.username);
 
+            // 2. CALCULATE STATS
+            const releaseTime = Date.now() + (10 * 60 * 1000); 
             await update(ref(UM.db, `users/${targetId}`), { 
                 cash: targetData.cash - seized, 
                 role: 'prisoner', 
@@ -376,9 +473,44 @@ client.on('messageCreate', async (message) => {
                 jail_count: (targetData.jail_count||0)+1 
             });
             await update(ref(UM.db, `users/${userId}`), { cash: user.cash + reward, cases_solved: (user.cases_solved||0)+1 });
+
+            // 3. GENERATE "RAP SHEET" FOR RECORD ROOM
+            // Fetch updated data to get the new history
+            const updatedTarget = await UM.getUser(targetId);
+            const history = updatedTarget.jail_history || {};
+            const records = Object.values(history);
             
+            let historyText = "";
+            let totalMins = 0;
+
+            records.forEach((rec, index) => {
+                totalMins += rec.duration;
+                historyText += `**#${index + 1}: Date: ${rec.date}**\nCase: ${rec.reason} | Time: ${rec.duration} mins | Officer: ${rec.officer}\n\n`;
+            });
+
+            // Calculate Hrs/Mins
+            const hrs = Math.floor(totalMins / 60);
+            const mins = totalMins % 60;
+            const timeString = hrs > 0 ? `${hrs} hrs, ${mins} mins` : `${mins} mins`;
+
+            const recordEmbed = new EmbedBuilder()
+                .setTitle(`📂 CRIMINAL RECORD: ${updatedTarget.username}`)
+                .setDescription(`**ID:** ${UM.maskID(updatedTarget.special_id, 'prisoner')}\n**Total Jail Count:** ${records.length}\n\n${historyText}**Total Time Served:** ${timeString}`)
+                .setColor(0xFFA500) // Orange color
+                .setTimestamp();
+
+            // Send to Prison Records Channel
+            client.channels.cache.get(Config.CHANNELS.PRISON_RECORDS)?.send({ embeds: [recordEmbed] });
+
+            // Send Notification to Jail Channel
+            const discordTime = Math.floor(releaseTime / 1000);
             client.channels.cache.get(Config.CHANNELS.PRISON_JAIL)?.send(`🔒 <@${targetId}> jailed by <@${userId}>.\n**Releasing:** <t:${discordTime}:R>`);
+            client.channels.cache.get(Config.CHANNELS.ROBBER_FEED)?.send(`🚓 **${updatedTarget.username}** was arrested by officer: **${user.username}**, and will be sent to Sector 7 Jail.`);
+            const news = UM.generateNews('arrest', user.username, updatedTarget.username, null);
+client.channels.cache.get(Config.CHANNELS.SECTOR7_NEWS)?.send(news);
+           
             return message.reply(`✅ Arrested! Reward: ${UM.fmt(reward)}`);
+
         }
     }
 });

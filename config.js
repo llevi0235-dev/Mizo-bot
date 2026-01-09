@@ -3,7 +3,10 @@ require('dotenv').config();
 module.exports = {
     // --- SECRETS ---
     DISCORD_TOKEN: process.env.DISCORD_TOKEN, 
-    ADMIN_ID: process.env.ADMIN_ID || "1373539575829368963", // Added fallback just in case
+    ADMIN_ID: process.env.ADMIN_ID || "1373539575829368963", 
+
+    // 👇 ADDED THIS (Required for Promotions)
+    GUILD_ID: '1450121159722008588', 
     
     // --- FIREBASE CONFIG ---
     firebaseConfig: {
@@ -29,7 +32,13 @@ module.exports = {
         
         // Logs
         CRIME_FEEDS: '1458855691271012480',
-        POLICE_RECORDS: '1458856052656443484',
+        ROBBER_FEED: '1459253361827119154',
+        POLICE_PROMOTIONS: '1459267929802805329',
+        SECTOR7_NEWS: '1459271957336817854',
+        
+        // Changed name from POLICE_RECORDS to RECORD_ROOM to match your index.js code
+        RECORD_ROOM: '1458856052656443484', 
+        
         PRISON_JAIL: '1458858485750960233',
         PRISON_RECORDS: '1458856403308646461',
         BUSINESS_INVEST_STATUS: '1458856807845072989',
