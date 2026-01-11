@@ -1,98 +1,121 @@
-const { ref, update, get, set } = require('firebase/database');
+const { ref, update } = require('firebase/database');
 const { EmbedBuilder } = require('discord.js');
 const Config = require('./config');
 const UM = require('./userManager');
 
 module.exports = (client) => {
-    
-    // 1. INCOME LOOP
+
+    // 1️⃣ INCOME + DM LOOP (EVERY 30 MINUTES)
     setInterval(async () => {
         const users = await UM.getAllUsers();
         const now = Date.now();
-        const guild = client.guilds.cache.get(Config.GUILD_ID) || client.guilds.cache.first();
+        const interval = 30 * 60 * 1000;
 
         for (const [userId, user] of Object.entries(users)) {
             if (user.role === 'prisoner') continue;
 
-            let interval = 30 * 60 * 1000;
-            let amount = 0;
+            const last = user.last_income || 0;
+            if (now - last < interval) continue;
 
+            let amount = 0;
+            let embed = null;
+
+            // 👮 POLICE
             if (user.role === 'police') {
-                const cases = user.cases || 0; 
-                const rank = [...Config.POLICE_RANKS].reverse().find(r => cases >= r.min) || Config.POLICE_RANKS[0];
+                const cases = user.cases || 0;
+                const rank = [...Config.POLICE_RANKS].reverse().find(r => cases >= r.min);
                 amount = rank.salary;
 
-                if (now - user.last_income >= interval) {
-                    await update(ref(UM.db, `users/${userId}`), { cash: user.cash + amount, last_income: now });
-                    
-                    if (guild) {
-                        const member = await guild.members.fetch(userId).catch(() => null);
-                        if (member) {
-                            const newRole = guild.roles.cache.find(r => r.name === rank.name);
-                            if (newRole && !member.roles.cache.has(newRole.id)) {
-                                for (const rData of Config.POLICE_RANKS) {
-                                    const oldRole = guild.roles.cache.find(r => r.name === rData.name);
-                                    if (oldRole && member.roles.cache.has(oldRole.id)) await member.roles.remove(oldRole).catch(()=>{});
-                                }
-                                await member.roles.add(newRole).catch(e => console.log(e));
-                                
-                                if (cases > 0) {
-                                    client.channels.cache.get(Config.CHANNELS.POLICE_PROMOTIONS)?.send(`📢 **PROMOTION**\n**${user.username}** is now **${rank.name}**.`);
-                                    client.channels.cache.get(Config.CHANNELS.SECTOR7_NEWS)?.send(UM.generateNews('promotion', user.username, null, rank.name));
-                                }
-                            }
-                        }
-                    }
-                    const embed = new EmbedBuilder().setTitle(`👮 Payday: ${UM.fmt(amount)}`).setDescription(`Rank: **${rank.name}**`).setColor(0x00FF00);
-                    client.users.send(userId, { embeds: [embed] }).catch(() => null);
-                }
-                continue;
+                embed = new EmbedBuilder()
+                    .setTitle(`👮 Payday: ${UM.fmt(amount)}`)
+                    .setDescription(
+                        `Good work, **${rank.name}**. Your payment for maintaining order in **Sector 7** has been deposited.\n\n` +
+                        `🏅 Current Rank: **${rank.name}**\n` +
+                        `⏱️ You will receive your next payment in **30 minutes**.`
+                    )
+                    .setColor(0x00FF00);
             }
 
-            if (user.role === 'citizen') amount = 400;
-            if (user.role === 'businessman') amount = 1000;
-            if (user.role === 'robber') { interval = 20 * 60 * 1000; amount = 50; }
-
-            if (now - user.last_income >= interval) {
-                await update(ref(UM.db, `users/${userId}`), { cash: user.cash + amount, last_income: now });
+            // 🏘️ CITIZEN
+            if (user.role === 'citizen') {
+                amount = 400;
+                embed = new EmbedBuilder()
+                    .setTitle(`🏙️ Sector 7 Citizen Update`)
+                    .setDescription(
+                        `Routine work and city services have been completed.\n\n` +
+                        `**$400 credited to your account.**\n` +
+                        `⏱️ Next credit in **30 minutes**.`
+                    )
+                    .setColor(0x3498DB);
             }
+
+            // 💼 BUSINESSMAN
+            if (user.role === 'businessman') {
+                amount = 1000;
+                embed = new EmbedBuilder()
+                    .setTitle(`🏙️ Sector 7 Economic Notice`)
+                    .setDescription(
+                        `To maintain commercial activity, Sector 7 has released support funds.\n\n` +
+                        `**$1000 deposited**\n` +
+                        `⏱️ Next fund release scheduled in **30 minutes**.`
+                    )
+                    .setColor(0xF1C40F);
+            }
+
+            // 🕶️ ROBBER
+            if (user.role === 'robber') {
+                amount = 600;
+                embed = new EmbedBuilder()
+                    .setTitle(`🕶️ Underworld Cut`)
+                    .setDescription(
+                        `Your network moved goods through the city.\n\n` +
+                        `**$600 added to your stash.**\n` +
+                        `⏱️ Next cut available in **30 minutes**.`
+                    )
+                    .setColor(0x8E44AD);
+            }
+
+            // APPLY PAYMENT + DM
+            await update(ref(UM.db, `users/${userId}`), {
+                cash: (user.cash || 0) + amount,
+                last_income: now
+            });
+
+            client.users.send(userId, { embeds: [embed] }).catch(() => null);
         }
-    }, 60000);
+    }, 60 * 1000); // check every minute
 
-    // 🛑 2. JAIL RELEASE LOOP (CRITICAL FIX)
+    // 2️⃣ JAIL RELEASE LOOP (UNCHANGED)
     setInterval(async () => {
         const users = await UM.getAllUsers();
         const now = Date.now();
         const guild = client.guilds.cache.get(Config.GUILD_ID);
 
         for (const [userId, user] of Object.entries(users)) {
-            // Check if user is prisoner AND time is up
             if (user.role === 'prisoner' && user.release_time && now >= user.release_time) {
-                
-                // 1. GENERATE NEW ID FOR ROBBER
+
                 const newID = UM.getNewID('robber');
 
-                // 2. UPDATE DB (Revert Role + New ID)
-                await update(ref(UM.db, `users/${userId}`), { 
-                    role: 'robber', 
-                    release_time: null, 
-                    special_id: newID 
+                await update(ref(UM.db, `users/${userId}`), {
+                    role: 'robber',
+                    release_time: null,
+                    special_id: newID
                 });
 
-                // 3. UPDATE DISCORD ROLES
                 if (guild) {
                     const member = await guild.members.fetch(userId).catch(() => null);
-                    if(member) {
+                    if (member) {
                         const pris = guild.roles.cache.find(r => r.name === 'Prisoner');
                         const rob = guild.roles.cache.find(r => r.name === 'Robber');
-                        if(pris) await member.roles.remove(pris).catch(()=>{});
-                        if(rob) await member.roles.add(rob).catch(()=>{});
+                        if (pris) await member.roles.remove(pris).catch(() => {});
+                        if (rob) await member.roles.add(rob).catch(() => {});
                     }
                 }
-                
-                // 4. LOG RELEASE
-                client.channels.cache.get(Config.CHANNELS.PRISON_JAIL)?.send(`🔓 **${user.username}** has served their time and is released.\n🆔 **New ID Assigned.**`);
+
+                client.channels.cache
+                    .get(Config.CHANNELS.PRISON_JAIL)
+                    ?.send(`🔓 **${user.username}** has served their time and is released.\n🆔 **New ID Assigned.**`);
             }
         }
-    }, 60000); // Checks every minute
+    }, 60 * 1000);
 };

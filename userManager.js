@@ -44,16 +44,24 @@ const UM = {
     // 5. Utilities
     fmt(amount) { return `$${amount.toLocaleString()}`; },
 
+    // 🔴 UPDATED: ROLE-BASED ID SYSTEM
     getNewID(role) {
-        return Math.floor(100000 + Math.random() * 900000); // Simple 6 digit ID
+        // Citizen & Robber → 3-digit ID
+        if (role === 'citizen' || role === 'robber') {
+            return Math.floor(100 + Math.random() * 900); // 100–999
+        }
+
+        // Police & Businessman → 6-digit ID
+        return Math.floor(100000 + Math.random() * 900000); // 100000–999999
     },
 
     maskID(special_id, role) {
         if (!special_id) return 'Unknown';
         if (role === 'police') return 'Officer';
         if (role === 'robber') return 'Masked';
+
         const str = String(special_id);
-        return str.length <= 3 ? str : str.substring(0, 3) + '***';
+        return str; // Citizens now truly have 3-digit IDs
     },
 
     generateNews(type, actor, target, amountOrRank) {
