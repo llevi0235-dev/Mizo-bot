@@ -44,13 +44,40 @@ async function setupImmigration() {
     }
 }
 
+// 🔒 JAIL MONITOR SETUP (Added)
+async function setupJailMonitor() {
+    // Uses the PRISON_JAIL ID from your Config
+    const channel = client.channels.cache.get(Config.CHANNELS.PRISON_JAIL); 
+    if (!channel) return;
+
+    // Check if message exists to avoid spam
+    const messages = await channel.messages.fetch({ limit: 5 });
+    const botMsg = messages.find(m => m.author.id === client.user.id && m.content.includes('PRISON ROSTER'));
+
+    if (!botMsg) {
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('refresh_jail_timer')
+                .setLabel('Refresh Timer')
+                .setEmoji('⏱️')
+                .setStyle(ButtonStyle.Secondary)
+        );
+
+        await channel.send({
+            content: '🔒 **SECTOR 7 PRISON ROSTER**\n\n*Click below to check remaining time.*',
+            components: [row]
+        });
+    }
+}
+
 // ✅ BOT READY
 client.once('ready', async () => {
     console.log('Sector 7 Online');
 
     await setupImmigration();
+    await setupJailMonitor(); // <--- JAIL MONITOR ACTIVATED
 
-    // 🔔 POST UPDATE ANNOUNCEMENT (THIS WAS MISSING BEFORE)
+    // 🔔 POST UPDATE ANNOUNCEMENT
     require('./update_info')(client);
 
     // 🔁 LOAD SYSTEMS

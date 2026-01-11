@@ -27,6 +27,53 @@ module.exports = (client) => {
     // ===============================
     client.on('interactionCreate', async (interaction) => {
         if (!interaction.isButton()) return;
+                // ---------------------------------------------------------
+        // JAIL TIMER REFRESH
+        // ---------------------------------------------------------
+        if (interaction.customId === 'refresh_jail_timer') {
+            await interaction.deferUpdate(); // Acknowledge click
+
+            const users = await UM.getAllUsers();
+            const now = Date.now();
+
+            // Filter Prisoners
+            const prisoners = Object.values(users)
+                .filter(u => u.role === 'prisoner')
+                .sort((a, b) => a.release_time - b.release_time);
+
+            let content = `🔒 **SECTOR 7 PRISON ROSTER**\n\n`;
+
+            if (prisoners.length === 0) {
+                content += `✅ **No active prisoners.**`;
+            } else {
+                prisoners.forEach((p, i) => {
+                    const timeLeft = p.release_time - now;
+                    
+                    if (timeLeft > 0) {
+                        // Calculate Exact Time
+                        const minutes = Math.floor(timeLeft / 60000);
+                        const seconds = Math.floor((timeLeft % 60000) / 1000);
+                        content += `${i+1}. **${p.username}** — ⏳ ${minutes}m ${seconds}s remaining\n`;
+                    } else {
+                        content += `${i+1}. **${p.username}** — *Processing Release...*\n`;
+                    }
+                });
+            }
+
+            content += `\n👇 *Click Refresh to update time.*`;
+
+            // Keep the button there
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('refresh_jail_timer')
+                    .setLabel('Refresh Timer')
+                    .setEmoji('⏱️')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+
+            return interaction.message.edit({ content, components: [row] });
+        }
+
 
         // ---------------------------------------------------------
         // 1. GET ID CARD (Start Ticket)
