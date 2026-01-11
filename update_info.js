@@ -2,12 +2,17 @@ const { EmbedBuilder } = require('discord.js');
 const Config = require('./config');
 
 module.exports = async (client) => {
-    const channel = client.channels.cache.get(Config.CHANNELS.ANNOUNCEMENTS);
-    if (!channel) return;
+    try {
+        // 🔧 FIX: FETCH channel instead of cache
+        const channel = await client.channels.fetch(
+            Config.CHANNELS.ANNOUNCEMENTS
+        );
 
-    const embed = new EmbedBuilder()
-        .setTitle('🟦 Sector 7 City Systems Update')
-        .setDescription(`
+        if (!channel) return;
+
+        const embed = new EmbedBuilder()
+            .setTitle('🟦 Sector 7 City Systems Update')
+            .setDescription(`
 **Version v1.0.0**
 
 ━━━━━━━━━━━━━━━━━━
@@ -44,10 +49,14 @@ module.exports = async (client) => {
 
 ━━━━━━━━━━━━━━━━━━
 🔔 *More updates coming soon…*
-        `)
-        .setColor(0x2F80ED)
-        .setFooter({ text: 'Sector 7 • City Systems Division' })
-        .setTimestamp();
+            `)
+            .setColor(0x2F80ED)
+            .setFooter({ text: 'Sector 7 • City Systems Division' })
+            .setTimestamp();
 
-    await channel.send({ embeds: [embed] });
+        await channel.send({ embeds: [embed] });
+
+    } catch (err) {
+        console.error('❌ Update post failed:', err);
+    }
 };
