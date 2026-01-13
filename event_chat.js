@@ -1,4 +1,5 @@
 const { ref, update, set } = require('firebase/database');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js'); // <--- ADDED THIS
 const Config = require('./config');
 const UM = require('./userManager');
 const Reporter = require('./reporter');
@@ -10,10 +11,55 @@ module.exports = (client) => {
 
         const content = message.content.trim();
         const userId = message.author.id;
+
+        // =========================================================
+        // 🛠️ ADMIN COMMAND: FORCE SETUP LEADERBOARDS
+        // =========================================================
+        if (content === '/setup') {
+            // Define your leaderboard channels and buttons
+            const channels = [
+                { id: Config.CHANNELS.LEADERBOARD_MAIN, name: '🏆 MAIN LEADERBOARD', btn: 'refresh_main_leaderboard' },
+                { id: Config.CHANNELS.TOP_OFFICERS, name: '👮 TOP OFFICERS', btn: 'refresh_top_officers' },
+                { id: Config.CHANNELS.LOOT_LEADERBOARD, name: '🕶️ TOP ROBBERS', btn: 'refresh_loot_leaderboard' },
+                { id: Config.CHANNELS.TOP_INVESTORS, name: '💼 TOP INVESTORS', btn: 'refresh_top_investors' }
+            ];
+
+            await message.reply("🔄 **Initializing Leaderboards...** Please check the channels.");
+
+            for (const c of channels) {
+                const chan = client.channels.cache.get(c.id);
+                if (chan) {
+                    // 1. Clear old messages (clean slate)
+                    try {
+                        const msgs = await chan.messages.fetch({ limit: 10 });
+                        await chan.bulkDelete(msgs).catch(() => {}); 
+                    } catch(e) {}
+
+                    // 2. Post New Board with Refresh Button
+                    const row = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(c.btn)
+                            .setLabel('Refresh')
+                            .setEmoji('🔄')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+                    
+                    await chan.send({ 
+                        content: `${c.name}\n\n*Waiting for data...*\nClick 🔄 to refresh.`, 
+                        components: [row] 
+                    });
+                }
+            }
+            return;
+        }
+
+        // =========================================================
+        // 👤 USER COMMANDS
+        // =========================================================
         
         let user = await UM.getUser(userId);
         
-        // 🛠️ RESET COMMAND (Keep for testing)
+        // 🛠️ RESET COMMAND
         if (content === '/reset') {
             await set(ref(UM.db, `users/${userId}`), null);
             return message.reply("♻️ Data Wiped.");
