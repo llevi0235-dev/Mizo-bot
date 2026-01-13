@@ -34,31 +34,33 @@ const UM = {
 
     // 🆔 ID GENERATOR
     getNewID(role) {
-        // Robber: STRICTLY 3 Digits (100 - 999)
+        // Robber: 3 Digits (100 - 999)
         if (role === 'robber') return Math.floor(100 + Math.random() * 900);
         
-        // Police/Business/Citizen: 6 Digits
+        // Others: 6 Digits (100000 - 999999)
         return Math.floor(100000 + Math.random() * 900000);
     },
 
-    // 🎭 MASKING SYSTEM
+    // 🎭 MASKING SYSTEM (UPDATED)
     maskID(special_id, role) {
         if (!special_id) return 'Unknown';
-        
         const str = String(special_id);
 
-        // ROBBER: 3 Digit ID (e.g. 492) -> Show "49?"
+        // ROBBER: Hide last 1 digit (e.g. 123 -> 12?)
         if (role === 'robber') {
-            const visible = str.substring(0, 2); 
-            return `${visible}?`; 
+            return str.substring(0, str.length - 1) + '?';
         }
 
-        // Everyone else: Show Full ID
+        // BUSINESSMAN: Hide last 3 digits (e.g. 123456 -> 123???)
+        if (role === 'businessman') {
+            return str.substring(0, str.length - 3) + '???';
+        }
+
+        // Police & Citizen: Show Full ID
         return str; 
     },
 
     generateNews(type, actor, target, amountOrRank) {
-        // (News logic kept same as before to save space)
         return `📰 **${type.toUpperCase()}**: ${actor} vs ${target}`;
     }
 };
