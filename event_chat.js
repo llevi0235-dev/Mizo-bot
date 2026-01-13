@@ -1,5 +1,5 @@
 const { ref, update, set } = require('firebase/database');
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js'); // <--- ADDED THIS
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js'); 
 const Config = require('./config');
 const UM = require('./userManager');
 const Reporter = require('./reporter');
@@ -13,10 +13,11 @@ module.exports = (client) => {
         const userId = message.author.id;
 
         // =========================================================
-        // 🛠️ ADMIN COMMAND: FORCE SETUP LEADERBOARDS
+        // 🛠️ FORCE SETUP LEADERBOARDS (UNLOCKED & DEBUGGED)
         // =========================================================
         if (content === '/setup') {
-            // Define your leaderboard channels and buttons
+            console.log(`[DEBUG] /setup command triggered by ${message.author.username}`);
+
             const channels = [
                 { id: Config.CHANNELS.LEADERBOARD_MAIN, name: '🏆 MAIN LEADERBOARD', btn: 'refresh_main_leaderboard' },
                 { id: Config.CHANNELS.TOP_OFFICERS, name: '👮 TOP OFFICERS', btn: 'refresh_top_officers' },
@@ -24,30 +25,38 @@ module.exports = (client) => {
                 { id: Config.CHANNELS.TOP_INVESTORS, name: '💼 TOP INVESTORS', btn: 'refresh_top_investors' }
             ];
 
-            await message.reply("🔄 **Initializing Leaderboards...** Please check the channels.");
+            await message.reply("🔄 **Processing Leaderboards...** Watch your console.");
 
             for (const c of channels) {
-                const chan = client.channels.cache.get(c.id);
-                if (chan) {
-                    // 1. Clear old messages (clean slate)
-                    try {
-                        const msgs = await chan.messages.fetch({ limit: 10 });
-                        await chan.bulkDelete(msgs).catch(() => {}); 
-                    } catch(e) {}
-
-                    // 2. Post New Board with Refresh Button
-                    const row = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(c.btn)
-                            .setLabel('Refresh')
-                            .setEmoji('🔄')
-                            .setStyle(ButtonStyle.Secondary)
-                    );
+                try {
+                    console.log(`[DEBUG] Looking for channel: ${c.id}`);
+                    // FETCH instead of cache.get (Fixes "channel not found" issues)
+                    const chan = await client.channels.fetch(c.id).catch(e => console.log(`[ERROR] Could not find channel ${c.id}:`, e));
                     
-                    await chan.send({ 
-                        content: `${c.name}\n\n*Waiting for data...*\nClick 🔄 to refresh.`, 
-                        components: [row] 
-                    });
+                    if (chan) {
+                        console.log(`[DEBUG] Found ${chan.name}. Clearing messages...`);
+                        
+                        // 1. Clear old messages
+                        const msgs = await chan.messages.fetch({ limit: 10 }).catch(() => {});
+                        if(msgs) await chan.bulkDelete(msgs).catch(() => {}); 
+
+                        // 2. Post New Board
+                        const row = new ActionRowBuilder().addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(c.btn)
+                                .setLabel('Refresh')
+                                .setEmoji('🔄')
+                                .setStyle(ButtonStyle.Secondary)
+                        );
+                        
+                        await chan.send({ 
+                            content: `${c.name}\n\n*Waiting for data...*\nClick 🔄 to refresh.`, 
+                            components: [row] 
+                        });
+                        console.log(`[DEBUG] Posted board to ${chan.name}`);
+                    }
+                } catch (error) {
+                    console.error(`[CRITICAL ERROR] Failed on ${c.name}:`, error);
                 }
             }
             return;
@@ -85,7 +94,6 @@ module.exports = (client) => {
                     .sort(()=>0.5-Math.random())
                     .slice(0,10);
                 
-                // Uses maskID correctly now
                 const list = all.map(t => `👤 **${t.username}** | 💰 ${UM.fmt(t.cash)} | 🆔 ${UM.maskID(t.special_id, t.role)}`).join('\n');
                 return message.reply(`🎯 **Available Targets:**\n${list || "No targets."}`);
             }
