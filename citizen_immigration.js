@@ -1,10 +1,10 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const UM = require('./userManager');
+const { ref, get, set } = require('firebase/database');
+const db = require('./database');
 const Config = require('./config');
 const CitizenLogic = require('./citizen_logic');
 
 module.exports = {
-    // The setup for the immigration channel message
     async setup(client) {
         const channel = await client.channels.fetch(Config.CHANNELS.IMMIGRATION);
         if (!channel) return;
@@ -23,30 +23,40 @@ module.exports = {
                 .setStyle(ButtonStyle.Primary)
         );
 
-        // Fetch and check for existing message to avoid spamming
         const messages = await channel.messages.fetch({ limit: 5 });
         if (!messages.find(m => m.author.id === client.user.id)) {
             await channel.send({ embeds: [embed], components: [row] });
         }
     },
 
-    // The logic that runs when the button is clicked
     async handleRegistration(interaction) {
         await interaction.deferReply({ ephemeral: true });
 
-        const existingUser = await UM.getUser(interaction.user.id);
-        if (existingUser) {
+        // 1. Check if user exists directly in Firebase
+        const snapshot = await get(ref(db, `users/${interaction.user.id}`));
+        if (snapshot.exists()) {
             return interaction.editReply("❌ **Error:** You are already registered in the city records.");
         }
 
-        // Create the new citizen profile
-        const newCitizen = await UM.createUser(
-            interaction.user.id, 
-            interaction.user.username, 
-            'citizen'
-        );
+        // 2. Generate the 6-digit ID using CitizenLogic
+        const newId = CitizenLogic.generateID(); 
 
-        const maskedID = UM.maskID(newCitizen.special_id, 'citizen');
+        // 3. Create the profile structure directly
+        const newUserData = {
+            id: newId,
+            username: interaction.user.username,
+            role: 'citizen',
+            cash: 5000, // Starting money
+            arrests: 0,
+            jailTime: null,
+            joinedAt: Date.now()
+        };
+
+        // 4. Save to Firebase
+        await set(ref(db, `users/${interaction.user.id}`), newUserData);
+
+        // 5. Mask the ID for the display (e.g., citizen-123456)
+        const maskedID = `citizen-${newId}`;
         
         return interaction.editReply(`✅ **Success!** Your Citizen ID has been issued: **${maskedID}**\nWelcome to Sector 7.`);
     }

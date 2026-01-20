@@ -1,13 +1,17 @@
 const Config = require('./config');
-const UM = require('./userManager');
 
 module.exports = {
     async logRobbery(client, robber, victim, amount) {
         const channel = await client.channels.fetch(Config.CHANNELS.CRIME_FEED);
         if (!channel) return;
         
-        const maskedID = UM.maskID(robber.special_id, 'robber');
-        await channel.send(`🚨 **CRIME ALERT:** A robbery occurred! **${maskedID}** stole **${UM.fmt(amount)}** from **${victim.username}**.`);
+        // Formatter: 1000 -> $1,000
+        const fmt = (n) => `$${(n || 0).toLocaleString()}`;
+        
+        // Simple Mask: Takes the 3-digit ID and prefixes it
+        const maskedID = `robber-${robber.id || '??? '}`;
+        
+        await channel.send(`🚨 **CRIME ALERT:** A robbery occurred! **${maskedID}** stole **${fmt(amount)}** from **${victim.username || 'a citizen'}**.`);
     },
 
     async logArrest(client, officer, robber, idUsed) {

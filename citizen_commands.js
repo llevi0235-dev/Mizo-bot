@@ -1,11 +1,12 @@
-const UM = require('./userManager');
+const { ref, get } = require('firebase/database');
+const db = require('./database');
 
 module.exports = async (message, user, content) => {
-    // --- /b (Balance Check) ---
-    if (content === '/b' || content === '/bal') {
-        const maskedID = UM.maskID(user.special_id, user.role);
-        return message.reply(`💳 **ID: ${maskedID}**\n💰 **Balance:** ${UM.fmt(user.cash || 0)}`);
-    }
+    const fmt = (n) => `$${(n || 0).toLocaleString()}`;
 
-    // You can add more general commands here later, like /profile
+    if (content === '/bal' || content === '/b') {
+        return message.reply({
+            content: `💳 **ID CARD: #${user.id || '000000'}**\n👤 **User:** <@${message.author.id}>\n💰 **Cash:** ${fmt(user.cash)}\n💼 **Role:** ${user.role.toUpperCase()}`
+        });
+    }
 };

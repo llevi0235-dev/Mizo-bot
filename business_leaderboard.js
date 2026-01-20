@@ -1,5 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const UM = require('./userManager');
+const { ref, get } = require('firebase/database');
+const db = require('./database');
 const Config = require('./config');
 
 const refreshButton = new ActionRowBuilder().addComponents(
@@ -15,8 +16,13 @@ module.exports = {
         const channel = await client.channels.fetch(Config.CHANNELS.BUSINESS_LEADERBOARD);
         if (!channel) return;
 
-        const users = await UM.getAllUsers();
+        // Fetch users directly from Firebase
+        const snapshot = await get(ref(db, 'users'));
+        const users = snapshot.val() || {};
         
+        // Formatter function (Replacing UM.fmt)
+        const fmt = (n) => `$${(n || 0).toLocaleString()}`;
+
         // Filter: Only Businessmen. Sort: By Cash (Highest first)
         const investors = Object.values(users)
             .filter(u => u.role === 'businessman')
@@ -30,7 +36,8 @@ module.exports = {
         } else {
             investors.forEach((u, i) => {
                 const icon = i === 0 ? '💰' : '💵';
-                content += `${icon} **${u.username}** — ${UM.fmt(u.cash || 0)}\n`;
+                // Note: We use u.username or "Investor" if username is missing
+                content += `${icon} **${u.username || 'Investor'}** — ${fmt(u.cash)}\n`;
             });
         }
 

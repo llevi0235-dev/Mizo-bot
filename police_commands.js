@@ -1,21 +1,25 @@
-const { ref, update } = require('firebase/database');
+const { ref, get, update } = require('firebase/database');
 const db = require('./database');
-const UM = require('./userManager');
-const PoliceLogic = require('./police_logic');
-const Reporter = require('./reporter');
+const Config = require('./config');
+const Reporter = require('./city_reporter'); // Check if your file is 'city_reporter.js'
 
 module.exports = async (message, user, content) => {
     const m = content.match(/^\/arrest\s*(\d+)$/);
     if (!m) return;
 
     const guess = m[1];
-    const allUsers = await UM.getAllUsers();
-    let targetId = null, targetData = null;
+    
+    // 1. Fetch all users directly from Firebase (No UM)
+    const snapshot = await get(ref(db, 'users'));
+    const allUsers = snapshot.val() || {};
+    
+    let targetUid = null;
+    let targetData = null;
 
-    // Search for the robber with that ID
+    // 2. Search for the robber with that 3-digit ID
     for (const [uid, u] of Object.entries(allUsers)) {
-        if (String(u.special_id) === guess && u.role === 'robber') {
-            targetId = uid;
+        if (String(u.id) === guess && u.role === 'robber') {
+            targetUid = uid;
             targetData = u;
             break;
         }
@@ -25,26 +29,31 @@ module.exports = async (message, user, content) => {
         return message.reply("❌ **Case Failed:** No robber found with that ID in the vicinity.");
     }
 
-    // Success Logic
-    const reward = PoliceLogic.calculateArrestReward();
+    // 3. Success Logic (Internalized reward calculation)
+    const reward = Math.floor(Math.random() * (1500 - 800 + 1)) + 800; // Random $800-$1500
     const releaseTime = Date.now() + (10 * 60 * 1000); // 10 minutes
+    const fmt = (n) => `$${(n || 0).toLocaleString()}`;
 
-    // 1. Jail the robber
-    await update(ref(db, `users/${targetId}`), {
+    // 4. Jail the robber
+    await update(ref(db, `users/${targetUid}`), {
         role: 'prisoner',
         release_time: releaseTime,
-        special_id: null
+        id: null // Clear their criminal ID
     });
 
-    // 2. Reward the officer and INCREMENT their cases (The Fix!)
+    // 5. Reward the officer and update stats
     const currentCases = user.cases || 0;
     await update(ref(db, `users/${message.author.id}`), {
         cash: (user.cash || 0) + reward,
         cases: currentCases + 1
     });
 
-    // 3. Log to Police Records
-    await Reporter.logArrest(message.client, user, targetData, guess);
+    // 6. Log to News Feed
+    try {
+        await Reporter.logArrest(message.client, user, targetData, guess);
+    } catch (e) {
+        console.log("Reporter log failed, but arrest processed.");
+    }
 
-    return message.reply(`🚓 **CASE CLOSED:** You arrested **${targetData.username}**. Earned **${UM.fmt(reward)}** and +1 Case File.`);
+    return message.reply(`🚓 **CASE CLOSED:** You arrested **${targetData.username || 'the suspect'}**. Earned **${fmt(reward)}** and +1 Case File.`);
 };
