@@ -1,15 +1,12 @@
-const { EmbedBuilder } = require('discord.js');
 const Config = require('./config');
 
 module.exports = async (client) => {
-    const channel = await client.channels.fetch(Config.CHANNELS.NEWS);
-    if (!channel) return;
-
-    const embed = new EmbedBuilder()
-        .setTitle('🏙️ Sector 7: Modular Systems Live')
-        .setDescription('The city has been reorganized into specialized districts (Police, Robber, Citizen, Business). All systems are now more stable and leaderboards are 100% accurate.')
-        .setColor(0x2F80ED)
-        .setTimestamp();
-
-    await channel.send({ embeds: [embed] });
+    try {
+        const channel = await client.channels.fetch(Config.CHANNELS.NEWS);
+        if (channel) {
+            await channel.send("📡 **SYSTEM:** Sector 7 Global Feed Synchronized.");
+        }
+    } catch (err) {
+        console.error("News Feed Error: Check your Config ID for NEWS");
+    }
 };
