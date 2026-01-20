@@ -1,6 +1,14 @@
 module.exports = {
-    // Paste your Bot Token and Firebase Config here as usual...
-    
+    TOKEN: process.env.DISCORD_TOKEN,
+    FIREBASE_CONFIG: {
+        apiKey: process.env.FIREBASE_API_KEY,
+        authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+        databaseURL: process.env.FIREBASE_DB_URL,
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: process.env.FIREBASE_SENDER_ID,
+        appId: process.env.FIREBASE_APP_ID
+    },
     CHANNELS: {
         IMMIGRATION: "1458862119532364013",
         MAIN_LEADERBOARD: "1458852649544843274",
@@ -8,8 +16,8 @@ module.exports = {
         ROBBER_LEADERBOARD: "1458853409179304046",
         BUSINESS_LEADERBOARD: "1458853822314053724",
         CRIME_FEED: "1458855691271012480",
-        NEWS: "1458856052656443484", // Record Room / Solved Cases
-        PRISON_LOGS: "1458858485750960233", // Jail countdown
+        NEWS: "1458856052656443484",
+        PRISON_LOGS: "1458858485750960233",
         PRISON_RECORDS: "1458856403308646461",
         INVEST_LIVE: "1458856807845072989",
         INVEST_RECORDS: "1458888748052775085"
