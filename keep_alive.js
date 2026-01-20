@@ -1,17 +1,9 @@
 const http = require('http');
 
-// Use Render's port or default to 8000
-const port = process.env.PORT || 8000;
-
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Sector 7 Bot & Firebase Database Running! 🚀'); // Changed text
-});
-
-function keepAlive() {
-    server.listen(port, () => {
-        console.log(`✅ Keep-Alive Server listening on port ${port}`);
-    });
-}
-
-module.exports = keepAlive;
+module.exports = () => {
+    http.createServer((req, res) => {
+        res.write('Sector 7 Modular Systems: Online 🚀');
+        res.end();
+    }).listen(8080);
+    console.log("🌐 Keep-Alive Server is running on Port 8080");
+};
